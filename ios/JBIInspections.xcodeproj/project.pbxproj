@@ -1,0 +1,35 @@
+// !$*UTF8*$!
+{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
+3DFBB3CA346BE5AC521F6DBC = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "API.swift"; sourceTree = "<group>"; };
+0C3B07FF9BD4E2B59AE1308F = { isa = PBXBuildFile; fileRef = 3DFBB3CA346BE5AC521F6DBC; };
+1DA16A4DC8B4D6FF08E2CE64 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Capture.swift"; sourceTree = "<group>"; };
+79BA0133A4CE86E5F5ECE64A = { isa = PBXBuildFile; fileRef = 1DA16A4DC8B4D6FF08E2CE64; };
+A1222A6051ADB8C3873DB8A9 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "InspectionStore.swift"; sourceTree = "<group>"; };
+4A7F3A17011634E52626DD28 = { isa = PBXBuildFile; fileRef = A1222A6051ADB8C3873DB8A9; };
+1220D3FA7810F122E4BBE4BE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "JBIInspectionsApp.swift"; sourceTree = "<group>"; };
+1A27E5EABB3095265324297D = { isa = PBXBuildFile; fileRef = 1220D3FA7810F122E4BBE4BE; };
+89F45C602E5BB3156C3F5558 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Models.swift"; sourceTree = "<group>"; };
+D1B1E93CC8825EE71A6BC9AF = { isa = PBXBuildFile; fileRef = 89F45C602E5BB3156C3F5558; };
+8D45AB34BCD74235E9472F84 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ReportEditor.swift"; sourceTree = "<group>"; };
+73A19C1049176A874218F228 = { isa = PBXBuildFile; fileRef = 8D45AB34BCD74235E9472F84; };
+B930DB5C66FFC70B6EC459A2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Views.swift"; sourceTree = "<group>"; };
+D7693334FE5864081CBB4379 = { isa = PBXBuildFile; fileRef = B930DB5C66FFC70B6EC459A2; };
+0112DAE3F84CB4DF5179BE01 = { isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+96ED5C5789B174A01557791C = { isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+07B760A8663938679E1BD8F1 = { isa = PBXBuildFile; fileRef = 96ED5C5789B174A01557791C; };
+38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JBIInspections.app; sourceTree = BUILT_PRODUCTS_DIR; };
+482182478A3ECD4745BEA917 = { isa = PBXGroup; children = (3DFBB3CA346BE5AC521F6DBC,1DA16A4DC8B4D6FF08E2CE64,A1222A6051ADB8C3873DB8A9,1220D3FA7810F122E4BBE4BE,89F45C602E5BB3156C3F5558,8D45AB34BCD74235E9472F84,B930DB5C66FFC70B6EC459A2,0112DAE3F84CB4DF5179BE01,96ED5C5789B174A01557791C); path = JBIInspections; sourceTree = "<group>"; };
+FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (38A007151ABE87CC01A5B6E9); name = Products; sourceTree = "<group>"; };
+B28B7AF69320201D1CF206EB = { isa = PBXGroup; children = (482182478A3ECD4745BEA917,FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0C3B07FF9BD4E2B59AE1308F,79BA0133A4CE86E5F5ECE64A,4A7F3A17011634E52626DD28,1A27E5EABB3095265324297D,D1B1E93CC8825EE71A6BC9AF,73A19C1049176A874218F228,D7693334FE5864081CBB4379); runOnlyForDeploymentPostprocessing = 0; };
+7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (07B760A8663938679E1BD8F1); runOnlyForDeploymentPostprocessing = 0; };
+89E1FD6268CC0F221A2BE178 = { isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = "YES";SWIFT_VERSION = "5.0";IPHONEOS_DEPLOYMENT_TARGET = "17.0";SDKROOT = "iphoneos";ENABLE_USER_SCRIPT_SANDBOXING = "YES";DEBUG_INFORMATION_FORMAT = "dwarf";SWIFT_OPTIMIZATION_LEVEL = "-Onone";SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG";}; name = Debug; };
+7082CC0B6FC1282FCEABD07A = { isa = XCBuildConfiguration; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = "nyc.dseny.JBIInspections";PRODUCT_NAME = "$(TARGET_NAME)";INFOPLIST_FILE = "JBIInspections/Info.plist";GENERATE_INFOPLIST_FILE = "NO";CODE_SIGN_STYLE = "Automatic";TARGETED_DEVICE_FAMILY = "1";CURRENT_PROJECT_VERSION = "1";MARKETING_VERSION = "0.1.0";ENABLE_PREVIEWS = "YES";LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";}; name = Debug; };
+E6DE6C99132752C914FEF632 = { isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = "YES";SWIFT_VERSION = "5.0";IPHONEOS_DEPLOYMENT_TARGET = "17.0";SDKROOT = "iphoneos";ENABLE_USER_SCRIPT_SANDBOXING = "YES";DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";SWIFT_OPTIMIZATION_LEVEL = "-O";SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";}; name = Release; };
+639A7CA24D39909E713B47F7 = { isa = XCBuildConfiguration; buildSettings = {PRODUCT_BUNDLE_IDENTIFIER = "nyc.dseny.JBIInspections";PRODUCT_NAME = "$(TARGET_NAME)";INFOPLIST_FILE = "JBIInspections/Info.plist";GENERATE_INFOPLIST_FILE = "NO";CODE_SIGN_STYLE = "Automatic";TARGETED_DEVICE_FAMILY = "1";CURRENT_PROJECT_VERSION = "1";MARKETING_VERSION = "0.1.0";ENABLE_PREVIEWS = "YES";LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";}; name = Release; };
+862894B703A6DEDF96A9DD6C = { isa = XCConfigurationList; buildConfigurations = (89E1FD6268CC0F221A2BE178,E6DE6C99132752C914FEF632); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+C57128001CE614BF8549D6BB = { isa = XCConfigurationList; buildConfigurations = (7082CC0B6FC1282FCEABD07A,639A7CA24D39909E713B47F7); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+0E8A3AD980EC179856012B7E = { isa = PBXNativeTarget; buildConfigurationList = C57128001CE614BF8549D6BB; buildPhases = (BCE16DD0260827ECF338C787,7561BFB015D8F536760CB671,0189424A5A60FED329FA868E); buildRules = (); dependencies = (); name = JBIInspections; productName = JBIInspections; productReference = 38A007151ABE87CC01A5B6E9; productType = "com.apple.product-type.application"; };
+98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 1600; TargetAttributes = { 0E8A3AD980EC179856012B7E = { CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = 862894B703A6DEDF96A9DD6C; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en,Base); mainGroup = B28B7AF69320201D1CF206EB; productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; targets = (0E8A3AD980EC179856012B7E); };
+}; rootObject = 98F54143AB4E86B28C3AFEE0; }

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: jbi-inspections
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: INSPECTION_API_TOKEN
+        generateValue: true
+      - key: INSPECTION_DATA_DIR
+        value: /var/data
+    disk:
+      name: inspection-data
+      mountPath: /var/data
+      sizeGB: 5

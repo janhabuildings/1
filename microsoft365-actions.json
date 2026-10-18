@@ -1,0 +1,369 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DSENY Microsoft 365 Inspection Drafts",
+    "version": "0.1.0",
+    "description": "Read inspection sources and create drafts only. Requires registered Microsoft OAuth app and shared-mailbox permissions. No send operation."
+  },
+  "servers": [
+    {
+      "url": "https://graph.microsoft.com/v1.0"
+    }
+  ],
+  "paths": {
+    "/me/calendarView": {
+      "get": {
+        "operationId": "findInspectionAppointments",
+        "summary": "Read appointments within a specified date range",
+        "parameters": [
+          {
+            "name": "startDateTime",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "endDateTime",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Microsoft Graph response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{mailbox}/messages": {
+      "get": {
+        "operationId": "findInspectionEmails",
+        "summary": "Read relevant inspection request emails",
+        "parameters": [
+          {
+            "name": "mailbox",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified mailbox email address; use DSENY inspections shared mailbox when permitted."
+          },
+          {
+            "name": "$search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Graph mail search expression, e.g. a quoted project identifier"
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Microsoft Graph response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createInspectionDraft",
+        "summary": "Create an unsent inspection email draft; never sends",
+        "x-openai-isConsequential": true,
+        "parameters": [
+          {
+            "name": "mailbox",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified mailbox email address; use DSENY inspections shared mailbox when permitted."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InspectionDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Draft created. Verify returned id, isDraft and attachment metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{mailbox}/messages/{messageId}": {
+      "get": {
+        "operationId": "readInspectionEmailOrDraft",
+        "summary": "Read source email or verify a created draft",
+        "parameters": [
+          {
+            "name": "mailbox",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified mailbox email address; use DSENY inspections shared mailbox when permitted."
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Microsoft Graph response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{mailbox}/messages/{messageId}/attachments": {
+      "get": {
+        "operationId": "readInspectionAttachments",
+        "summary": "Read source or draft attachments; follow Graph pagination",
+        "parameters": [
+          {
+            "name": "mailbox",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Verified mailbox email address; use DSENY inspections shared mailbox when permitted."
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Microsoft Graph response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "microsoftOAuth": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            "scopes": {
+              "https://graph.microsoft.com/Mail.ReadWrite": "Read mail and create drafts",
+              "https://graph.microsoft.com/Mail.ReadWrite.Shared": "Access permitted shared mailboxes",
+              "https://graph.microsoft.com/Calendars.Read": "Read own calendar",
+              "offline_access": "Maintain authorized session"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "InspectionDraft": {
+        "type": "object",
+        "required": [
+          "subject",
+          "body",
+          "toRecipients",
+          "ccRecipients"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "object",
+            "required": [
+              "contentType",
+              "content"
+            ],
+            "properties": {
+              "contentType": {
+                "type": "string",
+                "enum": [
+                  "HTML"
+                ]
+              },
+              "content": {
+                "type": "string"
+              }
+            }
+          },
+          "toRecipients": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "emailAddress"
+              ],
+              "properties": {
+                "emailAddress": {
+                  "type": "object",
+                  "required": [
+                    "address"
+                  ],
+                  "properties": {
+                    "address": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "ccRecipients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "emailAddress"
+              ],
+              "properties": {
+                "emailAddress": {
+                  "type": "object",
+                  "required": [
+                    "address"
+                  ],
+                  "properties": {
+                    "address": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "@odata.type",
+                "name",
+                "contentType",
+                "contentBytes"
+              ],
+              "properties": {
+                "@odata.type": {
+                  "type": "string",
+                  "enum": [
+                    "#microsoft.graph.fileAttachment"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string",
+                  "enum": [
+                    "application/pdf"
+                  ]
+                },
+                "contentBytes": {
+                  "type": "string",
+                  "description": "Base64 bytes of actual reviewed PDF. Simple attachments only; keep under 3 MB."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "microsoftOAuth": []
+    }
+  ]
+}

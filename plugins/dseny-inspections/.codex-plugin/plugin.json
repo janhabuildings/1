@@ -1,0 +1,18 @@
+{
+  "name": "dseny-inspections",
+  "version": "0.1.0",
+  "description": "Prepare scaffold and shed inspection reports from pasted calendar details and inspector observations, preserving original DOCX templates and creating unsent Gmail drafts when available.",
+  "skills": "./skills/",
+  "apps": "./.app.json",
+  "keywords": ["inspection", "scaffold", "sidewalk-shed", "docx", "gmail", "drafts"],
+  "interface": {
+    "displayName": "DSENY Inspection Reports",
+    "shortDescription": "Create scaffold and shed reports and Gmail drafts",
+    "longDescription": "Collect pasted appointment details, attendees and photo-supported inspection findings. Prepare separate scaffold/shed reports, with open items in the email body and No OIs reports as DOCX/PDF attachments. Never sends mail.",
+    "developerName": "DSENY",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": ["Prepare my scaffold and shed inspection reports from this calendar entry and my findings."],
+    "brandColor": "#008080"
+  }
+}

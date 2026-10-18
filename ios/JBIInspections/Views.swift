@@ -1,0 +1,414 @@
+import SwiftUI
+import PhotosUI
+import AVFoundation
+import MessageUI
+import UniformTypeIdentifiers
+
+struct SharedItems: Identifiable { let id = UUID(); var items: [Any] }
+struct MailAttachment { var data: Data; var filename: String }
+struct MailPayload: Identifiable { let id = UUID(); var subject: String; var html: String; var attachments: [MailAttachment] }
+
+struct InspectionList: View {
+    @EnvironmentObject var store: InspectionStore
+    @State private var settings = false
+    @State private var syncing = false
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Capture on site. Review findings before preparing reports.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                ForEach(store.cache.inspections) { inspection in
+                    NavigationLink(value: inspection.id) {
+                        VStack(alignment: .leading) {
+                            Text(inspection.title).font(.headline)
+                            Text("\(inspection.project) · \(inspection.inspection_date)").font(.caption)
+                            if store.cache.dirty.contains(inspection.id) { Label("Saved on this phone · not synced", systemImage: "iphone").font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                }
+            }
+            .overlay { if store.cache.inspections.isEmpty { ContentUnavailableView("Your inspections", systemImage: "building.2", description: Text("Tap + to begin. Photos and notes are saved on your phone.")) } }
+            .navigationTitle("JBI Inspections")
+            .navigationDestination(for: String.self) { identity in
+                if let inspection = store.cache.inspections.first(where: { $0.id == identity }) { InspectionDetail(inspection: inspection) }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gear") { settings = true } }
+                ToolbarItem(placement: .topBarTrailing) { Button("New inspection", systemImage: "plus") { store.save(Inspection()) } }
+                ToolbarItem(placement: .bottomBar) {
+                    Button(syncing ? "Refreshing…" : "Refresh synced inspections", systemImage: "arrow.clockwise") {
+                        Task { syncing = true; defer { syncing = false }; do { try await store.refresh() } catch { store.error = error.localizedDescription } }
+                    }.disabled(syncing)
+                }
+            }
+            .sheet(isPresented: $settings) { SettingsView() }
+            .alert("Inspection app", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
+                Button("OK") { store.error = nil }
+            } message: { Text(store.error ?? "") }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage("backendURL") private var backendURL = ""
+    @State private var token = SecureToken.read()
+    @State private var result = ""
+    @Environment(\.dismiss) var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Private backend") {
+                    TextField("https://your-service.onrender.com", text: $backendURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField("Backend API token", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Save connection") {
+                        do { try SecureToken.save(token); result = "Saved. Credentials stay in this phone's Keychain." }
+                        catch { result = error.localizedDescription }
+                    }
+                    Button("Test connection") {
+                        Task {
+                            do {
+                                let data = try await API(baseURL: backendURL, token: token).request("/capabilities")
+                                result = "Connected.\n" + (String(data: data, encoding: .utf8) ?? "")
+                            } catch { result = error.localizedDescription }
+                        }
+                    }
+                    if !result.isEmpty { Text(result).font(.caption).textSelection(.enabled) }
+                }
+                Section("What stays under your control") {
+                    Text("Capture works offline. Sync uploads the selected inspection and its media to your private backend. AI analysis sends selected text and photos to the configured provider only after confirmation.")
+                    Text("Phone and WhatsApp call audio cannot be captured by this app. Import an existing recording or transcript instead.")
+                    Text("Mail opens Apple's composer for your configured account. This version does not create remote Gmail drafts automatically.")
+                }
+            }.navigationTitle("Settings").toolbar { Button("Done") { dismiss() } }
+        }
+    }
+}
+
+struct InspectionDetail: View {
+    @EnvironmentObject var store: InspectionStore
+    @State var inspection: Inspection
+    @StateObject private var audio = AudioCapture()
+    @Environment(\.scenePhase) private var phase
+    @State private var camera = false
+    @State private var photoSelection: PhotosPickerItem?
+    @State private var importFile = false
+    @State private var recordConsent = false
+    @State private var aiConsent = false
+    @State private var busy = false
+    @State private var suggestions = ""
+    @State private var suggestedFindings: [SuggestedFinding] = []
+    @State private var calendarCandidates: CalendarCandidates?
+    @State private var export: ExportResult?
+    @State private var share: SharedItems?
+    @State private var mail: MailPayload?
+    @State private var showText = false
+    @State private var status = ""
+
+    var body: some View {
+        Form {
+            basics
+            capture
+            media
+            Section("Transcript and field notes") {
+                Text("Review and correct transcriptions. They do not automatically become inspection findings.").font(.caption).foregroundStyle(.secondary)
+                TextEditor(text: $inspection.transcript).frame(minHeight: 120).accessibilityLabel("Conversation transcript")
+                TextEditor(text: $inspection.notes).frame(minHeight: 100).accessibilityLabel("Inspector notes")
+            }
+            reports
+            Section("References") {
+                NavigationLink("Search OSHA / DOB / SCA library") { CodeSearchView(onDate: inspection.inspection_date) }
+            }
+            actions
+            if !suggestedFindings.isEmpty {
+                Section("Review suggested findings") {
+                    ForEach(suggestedFindings) { finding in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(finding.observation).font(.headline)
+                            Text(finding.location)
+                            Text(finding.suggested_action)
+                            if !finding.source_quote.isEmpty { Text("Source: \(finding.source_quote)").font(.caption) }
+                            ForEach(finding.references) { reference in
+                                Text("Reference for review: \(reference.agency) \(reference.section)").font(.caption)
+                                Text(reference.quote).font(.caption).italic()
+                                if let url = URL(string: reference.url), url.scheme == "https" { Link("Verify code source and applicability", destination: url) }
+                            }
+                            if let photo = finding.photo_id { Text("Photo: \(photo)").font(.caption2) }
+                            if ["SF", "SH"].contains(finding.equipment) {
+                                Button("Confirm and add as \(finding.equipment == "SF" ? "scaffold" : "shed") open item") {
+                                    adopt(finding)
+                                }
+                            } else { Text("Equipment is unclear; add this manually after clarification.").font(.caption) }
+                        }
+                    }
+                }
+            }
+            if let export { artifacts(export) }
+            if !suggestions.isEmpty {
+                Section("Candidates and analysis details") {
+                    Text(suggestions).font(.caption).textSelection(.enabled)
+                    if calendarCandidates != nil { Button("Use calendar candidates as draft facts") { applyCalendar() } }
+                }
+            }
+            if !status.isEmpty { Section { Text(status).font(.caption).textSelection(.enabled) } }
+        }
+        .navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
+        .onChange(of: inspection) { _, value in store.save(value) }
+        .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
+        .onDisappear { finishRecording(); store.save(inspection) }
+        .onChange(of: photoSelection) { _, item in
+            Task {
+                do {
+                    if let data = try await item?.loadTransferable(type: Data.self), let image = UIImage(data: data) { savePhoto(image) }
+                } catch { store.error = error.localizedDescription }
+            }
+        }
+        .sheet(isPresented: $camera) { CameraView(captured: savePhoto).ignoresSafeArea() }
+        .sheet(item: $share) { ShareSheet(items: $0.items) }
+        .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments) }
+        .sheet(isPresented: $showText) { TextDraft(body: "\(inspection.project) — inspection \(inspection.inspection_date)\n\(inspection.notes)") }
+        .fileImporter(isPresented: $importFile, allowedContentTypes: [.audio, .plainText], allowsMultipleSelection: false, onCompletion: importMedia)
+        .confirmationDialog("Record this conversation?", isPresented: $recordConsent, titleVisibility: .visible) {
+            Button("Participants informed — start recording") {
+                Task { do { try await audio.start() } catch { store.error = error.localizedDescription } }
+            }
+        } message: { Text("Record only when participants are informed and applicable consent requirements are met. Recording stops when you leave this screen or the app becomes inactive.") }
+        .confirmationDialog("Send inspection data for AI analysis?", isPresented: $aiConsent, titleVisibility: .visible) {
+            Button("Send notes, transcript and up to six photos") { analyze() }
+        } message: { Text("This sends calendar text, notes, transcript and the first six inspection photos to the backend's configured AI provider. Suggestions require your review and won't change your report.") }
+    }
+    private var basics: some View {
+        Section("Inspection") {
+            TextField("Title", text: $inspection.title)
+            TextField("Project", text: $inspection.project)
+            TextField("Inspection date · YYYY-MM-DD", text: $inspection.inspection_date)
+            Text("Paste the complete calendar entry below.").font(.caption)
+            TextEditor(text: $inspection.calendar_text).frame(minHeight: 140).accessibilityLabel("Calendar content")
+            Button("Extract calendar candidates") { extract() }.disabled(busy)
+        }
+    }
+    private var capture: some View {
+        Section("Capture") {
+            Button("Take inspection photo", systemImage: "camera") {
+                guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "A physical iPhone camera is required."; return }
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    Task { @MainActor in if granted { camera = true } else { store.error = "Enable camera permission in iPhone Settings." } }
+                }
+            }
+            PhotosPicker(selection: $photoSelection, matching: .images) { Label("Import a photo", systemImage: "photo") }
+            Button(audio.recording ? "Stop recording" : "Record on-site conversation", systemImage: audio.recording ? "stop.circle.fill" : "mic") {
+                if audio.recording { finishRecording() } else { recordConsent = true }
+            }.foregroundStyle(audio.recording ? Color.red : Color.accentColor)
+            if audio.recording { Label("Recording in progress", systemImage: "waveform").foregroundStyle(.red) }
+            Button("Import audio or a transcript", systemImage: "square.and.arrow.down") { importFile = true }
+        }
+    }
+    private var media: some View {
+        Section("Photo and audio evidence") {
+            ForEach(store.cache.media.indices.filter { store.cache.media[$0].inspectionID == inspection.id }, id: \.self) { index in
+                let item = store.cache.media[index]
+                VStack(alignment: .leading, spacing: 8) {
+                    if item.kind == "photo", let image = UIImage(contentsOfFile: store.mediaURL(item).path) {
+                        Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 180)
+                    } else { Label("Audio recording", systemImage: "waveform") }
+                    Picker("Equipment", selection: $store.cache.media[index].equipment) {
+                        Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH")
+                    }
+                    TextField("Location / observation", text: $store.cache.media[index].note, axis: .vertical)
+                    HStack {
+                        Button("Share") { share = SharedItems(items: [store.mediaURL(item)]) }.buttonStyle(.borderless)
+                        if item.kind == "audio" {
+                            Button(audio.transcribing ? "Transcribing…" : "Transcribe on device") {
+                                Task {
+                                    do {
+                                        let text = try await audio.transcribe(store.mediaURL(item))
+                                        inspection.transcript += (inspection.transcript.isEmpty ? "" : "\n\n") + text
+                                    } catch { store.error = error.localizedDescription }
+                                }
+                            }.disabled(audio.transcribing).buttonStyle(.borderless)
+                        }
+                    }
+                    Text(item.uploaded ? "Uploaded to backend" : "Saved on this phone").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }.onChange(of: store.cache.media) { _, _ in store.cache.dirty.insert(inspection.id); store.persist() }
+    }
+    private var reports: some View {
+        Section("Report facts — inspector review") {
+            ForEach($inspection.reports) { $report in
+                NavigationLink(report.equipment == "SF" ? "Scaffold report" : "Shed report") { ReportEditor(report: $report) }
+            }
+            if !inspection.reports.contains(where: { $0.equipment == "SF" }) { Button("Add scaffold report") { addReport("SF") } }
+            if !inspection.reports.contains(where: { $0.equipment == "SH" }) { Button("Add shed report") { addReport("SH") } }
+        }
+    }
+    private var actions: some View {
+        Section("Review and prepare") {
+            Button("Sync this inspection", systemImage: "arrow.triangle.2.circlepath") { sync() }.disabled(busy)
+            Button("Suggest findings from notes/photos", systemImage: "sparkles") { aiConsent = true }.disabled(busy)
+            Button("Generate review reports", systemImage: "doc.richtext") { generate() }.disabled(busy)
+            Button("Share notes to WhatsApp or another app", systemImage: "square.and.arrow.up") {
+                share = SharedItems(items: ["\(inspection.project) · \(inspection.inspection_date)\n\(inspection.notes)"])
+            }
+            Button("Prepare a text message", systemImage: "message") {
+                if MFMessageComposeViewController.canSendText() { showText = true }
+                else { store.error = "Messages is not configured on this device." }
+            }
+            Text("You review all messages and choose whether to send. The app cannot read your personal SMS or WhatsApp history.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private func artifacts(_ result: ExportResult) -> some View {
+        Section("Generated review files") {
+            Text(result.notice).font(.caption)
+            ForEach(result.artifacts) { artifact in
+                VStack(alignment: .leading) {
+                    Text(artifact.filename).font(.caption)
+                    HStack {
+                        Button("Open / share") {
+                            Task { do { share = SharedItems(items: [try await store.download(artifact)]) } catch { store.error = error.localizedDescription } }
+                        }.buttonStyle(.borderless)
+                        if artifact.mime == "text/html" {
+                            Button("Email draft") { compose(artifact, artifacts: result.artifacts) }.buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+            if let data = try? JSONEncoder().encode(result.reports), let text = String(data: data, encoding: .utf8) {
+                Text(text).font(.caption2).textSelection(.enabled)
+            }
+            Text("Check fonts, wrapping and page breaks before delivery. PDFs are unsigned review drafts.").font(.caption).foregroundStyle(.orange)
+        }
+    }
+    private func addReport(_ type: String) {
+        var report = ReportDraft(equipment: type)
+        report.project = inspection.project; report.inspection_date = inspection.inspection_date
+        inspection.reports.append(report)
+    }
+    private func savePhoto(_ image: UIImage) {
+        do {
+            guard let data = image.jpegData(compressionQuality: 0.85) else { throw APIError(message: "Could not encode photo.") }
+            try store.addMedia(data, to: inspection, kind: "photo", mime: "image/jpeg", ext: "jpg")
+        } catch { store.error = error.localizedDescription }
+    }
+    private func finishRecording() {
+        guard let url = audio.stop() else { return }
+        do {
+            try store.addMedia(Data(contentsOf: url), to: inspection, kind: "audio", mime: "audio/mp4", ext: "m4a")
+            try? FileManager.default.removeItem(at: url)
+        } catch { store.error = error.localizedDescription }
+    }
+    private func importMedia(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            guard data.count <= 40 * 1024 * 1024 else { throw APIError(message: "Import limit is 40 MB.") }
+            let ext = url.pathExtension.lowercased()
+            if ext == "txt" {
+                guard let text = String(data: data, encoding: .utf8) else { throw APIError(message: "Use a UTF-8 transcript file.") }
+                inspection.transcript += (inspection.transcript.isEmpty ? "" : "\n\n") + text
+            } else {
+                let types = ["m4a": "audio/mp4", "wav": "audio/wav", "mp3": "audio/mpeg"]
+                guard let mime = types[ext] else { throw APIError(message: "Import M4A, WAV, MP3 or UTF-8 TXT.") }
+                try store.addMedia(data, to: inspection, kind: "audio", mime: mime, ext: ext)
+            }
+        } catch { store.error = error.localizedDescription }
+    }
+    private func sync() {
+        Task { busy = true; defer { busy = false }; do { store.save(inspection); try await store.sync(inspection); status = "Inspection and media synced." } catch { store.error = error.localizedDescription } }
+    }
+    private func extract() {
+        Task {
+            busy = true; defer { busy = false }
+            do {
+                let data = try await store.api.json("/calendar/extract", object: ["text": inspection.calendar_text])
+                calendarCandidates = try JSONDecoder().decode(CalendarCandidates.self, from: data)
+                // No outcome or drawing approval is inferred.
+                let object = try JSONSerialization.jsonObject(with: data)
+                let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+                suggestions = String(data: pretty, encoding: .utf8) ?? ""
+                status = "Calendar candidates extracted. Confirm the values in each report; no inspection outcome was inferred."
+            } catch { store.error = error.localizedDescription }
+        }
+    }
+    private func applyCalendar() {
+        guard let candidates = calendarCandidates else { return }
+        if let value = candidates.fields["project"] { inspection.project = value }
+        if let value = candidates.fields["inspection_date"] { inspection.inspection_date = value }
+        for item in candidates.equipment {
+            if let equipment = item["equipment"], !inspection.reports.contains(where: { $0.equipment == equipment }) { addReport(equipment) }
+        }
+        for index in inspection.reports.indices {
+            if inspection.reports[index].client.isEmpty { inspection.reports[index].client = candidates.fields["client"] ?? "" }
+            if inspection.reports[index].project.isEmpty { inspection.reports[index].project = candidates.fields["project"] ?? "" }
+            if inspection.reports[index].requested_by.isEmpty { inspection.reports[index].requested_by = candidates.fields["requested_by"] ?? "" }
+            if inspection.reports[index].address.isEmpty { inspection.reports[index].address = candidates.fields["address"] ?? "" }
+            if inspection.reports[index].request_date.isEmpty { inspection.reports[index].request_date = candidates.fields["request_date"] ?? "" }
+            if let date = candidates.fields["inspection_date"] { inspection.reports[index].inspection_date = date }
+            if let item = candidates.equipment.first(where: { $0["equipment"] == inspection.reports[index].equipment }) {
+                if inspection.reports[index].permit.isEmpty { inspection.reports[index].permit = item["permit"] ?? "" }
+                if inspection.reports[index].inspection_code.isEmpty { inspection.reports[index].inspection_code = item["inspection_code"] ?? "" }
+                if inspection.reports[index].subject_project.isEmpty { inspection.reports[index].subject_project = item["subject_project"] ?? "" }
+            }
+        }
+        calendarCandidates = nil; status = "Calendar candidates added as draft facts. Review each report and confirm the result and drawing status."
+    }
+    private func analyze() {
+        Task {
+            busy = true; defer { busy = false }
+            do {
+                store.save(inspection); try await store.sync(inspection)
+                let ids = store.cache.media.filter { $0.inspectionID == inspection.id && $0.kind == "photo" }.prefix(6).map(\.id)
+                let data = try await store.api.json("/inspections/\(inspection.id)/analyze", object: ["consent": true, "media_ids": Array(ids)])
+                suggestedFindings = try JSONDecoder().decode(AISuggestionResponse.self, from: data).suggestions.suggested_findings
+                let object = try JSONSerialization.jsonObject(with: data)
+                let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+                suggestions = String(data: pretty, encoding: .utf8) ?? ""
+            } catch { store.error = error.localizedDescription }
+        }
+    }
+    private func adopt(_ finding: SuggestedFinding) {
+        if !inspection.reports.contains(where: { $0.equipment == finding.equipment }) { addReport(finding.equipment) }
+        guard let index = inspection.reports.firstIndex(where: { $0.equipment == finding.equipment }) else { return }
+        inspection.reports[index].status = "OIs"
+        inspection.reports[index].open_items.append(Finding(location: finding.location, action: finding.suggested_action))
+        if let photo = finding.photo_id { inspection.reports[index].photo_references.append(photo) }
+        inspection.reports[index].source_references.append(finding.source_quote)
+        for reference in finding.references { inspection.reports[index].source_references.append("\(reference.agency) \(reference.section): \(reference.url)") }
+        suggestedFindings.removeAll { $0.id == finding.id }
+    }
+    private func generate() {
+        Task {
+            busy = true; defer { busy = false }
+            do {
+                for index in inspection.reports.indices {
+                    let equipment = inspection.reports[index].equipment
+                    let refs = store.cache.media.filter { $0.inspectionID == inspection.id && $0.kind == "photo" && $0.equipment == equipment }.map(\.id)
+                    inspection.reports[index].photo_references = Array(Set(inspection.reports[index].photo_references + refs))
+                }
+                store.save(inspection); try await store.sync(inspection)
+                let data = try await store.api.json("/inspections/\(inspection.id)/reports", object: [:])
+                export = try JSONDecoder().decode(ExportResult.self, from: data)
+            } catch { store.error = error.localizedDescription }
+        }
+    }
+    private func compose(_ htmlArtifact: Artifact, artifacts: [Artifact]) {
+        guard MFMailComposeViewController.canSendMail() else { store.error = "Configure an account in Apple's Mail app to use the HTML composer. You can still share the generated files."; return }
+        Task {
+            do {
+                let url = try await store.download(htmlArtifact)
+                let html = try String(contentsOf: url, encoding: .utf8)
+                var attachments: [MailAttachment] = []
+                for artifact in artifacts where artifact.equipment == htmlArtifact.equipment && artifact.mime == "application/pdf" {
+                    let file = try await store.download(artifact)
+                    let data = try Data(contentsOf: file)
+                    guard data.starts(with: Data("%PDF-".utf8)) else { throw APIError(message: "The report attachment is not a valid PDF.") }
+                    attachments.append(MailAttachment(data: data, filename: artifact.filename))
+                }
+                let subject = htmlArtifact.filename.replacingOccurrences(of: " - DRAFT.html", with: "").replacingOccurrences(of: " - Cover.html", with: "")
+                mail = MailPayload(subject: subject, html: html, attachments: attachments)
+            } catch { store.error = error.localizedDescription }
+        }
+    }
+}

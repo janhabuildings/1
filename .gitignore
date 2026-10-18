@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+.tools/
+output/
+dist/
+plugins/dseny-inspections/runtime/
+plugins/dseny-inspections/checksums.json
+.dseny-inspections/
+.env
+*.sqlite3
+*.sqlite3-*
+ios/**/xcuserdata/
+ios/**/DerivedData/

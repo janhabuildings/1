@@ -1,0 +1,51 @@
+{
+  "mailbox": {
+    "account": "janhabuildings@gmail.com",
+    "to": [],
+    "cc": []
+  },
+  "reports": [
+    {
+      "equipment": "SF",
+      "status": "OIs",
+      "client": "DEMO CLIENT",
+      "project": "DEMO-PROJECT",
+      "subject_project": "DEMO-PROJECT (ALTERNATE)",
+      "request_date": "2026-05-08",
+      "inspection_date": "2026-05-18",
+      "requested_by": "Example Contact, Example Contractor",
+      "permit": "DEMO-SF-PERMIT",
+      "address": "100 Example Street, New York, NY",
+      "locations": "North facade, bays 1–4",
+      "inspection_code": "VIII",
+      "drawings_on_site": "Yes",
+      "drawings_approved": "Yes",
+      "attendees": [{"name": "Example Inspector", "company": "DSENY Engineering Services PC", "title": "PE"}],
+      "site": {"length_ft": "100", "height_ft": "40", "tie_horizontal": "20 ft", "tie_vertical": "20 ft", "planked_levels": "2", "outrigger_levels": "NA", "tie_type": "Concrete Wall Anchor", "dunnage_type": "Grade"},
+      "open_items": [{"location": "Approximately 4–5 locations throughout the site, scaffold platform edges", "action": "Install missing toeboards at all open edges of scaffold platforms throughout the site."}],
+      "source_references": ["User-pasted calendar and inspector-confirmed findings"],
+      "photo_references": []
+    },
+    {
+      "equipment": "SH",
+      "status": "No OIs",
+      "client": "DEMO CLIENT",
+      "project": "DEMO-PROJECT",
+      "subject_project": "DEMO-PROJECT (ALTERNATE)",
+      "request_date": "2026-05-08",
+      "inspection_date": "2026-05-18",
+      "requested_by": "Example Contact, Example Contractor",
+      "permit": "DEMO-SH-PERMIT",
+      "address": "100 Example Street, New York, NY",
+      "locations": "North facade",
+      "inspection_code": "VII",
+      "drawings_on_site": "Yes",
+      "drawings_approved": "Yes",
+      "attendees": [{"name": "Example Inspector", "company": "DSENY Engineering Services PC", "title": "PE"}],
+      "site": {"length_ft": "100", "sections": "2", "height_ft": "12", "width_ft": "12"},
+      "open_items": [],
+      "source_references": ["User-pasted calendar and inspector confirmation of No OIs"],
+      "photo_references": []
+    }
+  ]
+}

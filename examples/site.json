@@ -1,0 +1,22 @@
+{
+  "equipment": "SF",
+  "status": "OIs",
+  "client": "DEMO CLIENT",
+  "project": "DEMO-PROJECT",
+  "request_date": "2026-05-08",
+  "inspection_date": "2026-05-18",
+  "requested_by": "Example Contact\nExample Contractor",
+  "permit": "DEMO-PERMIT",
+  "address": "100 Example Street, New York, NY",
+  "locations": "North facade, bays 1–4",
+  "inspection_code": "I",
+  "drawings_on_site": "Yes",
+  "drawings_approved": "Yes",
+  "attendees": [{"name": "Example Inspector", "company": "DSENY Engineering Services PC", "title": "PE"}],
+  "site": {"length_ft": "100", "height_ft": "40", "tie_horizontal": "20 ft", "tie_vertical": "20 ft", "planked_levels": "2", "outrigger_levels": "NA", "tie_type": "Concrete Wall Anchor", "dunnage_type": "Grade"},
+  "open_items": [{"location": "North facade, bay 2", "action": "Replace damaged plank as identified by inspector."}],
+  "sender": "inspections@example.com",
+  "to": ["client@example.com"],
+  "cc": ["inspections@example.com"],
+  "recipients_confirmed": true
+}

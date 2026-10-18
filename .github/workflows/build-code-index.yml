@@ -1,0 +1,26 @@
+name: Build reviewed code reference index
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements.txt
+      - name: Require the reviewed corpus
+        run: test -s code_library/sections.json
+      - name: Embed approved sections into a portable SQLite artifact
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          INSPECTION_DATA_DIR: ${{ runner.temp }}/code-index
+        run: python -m backend.ingest_codes code_library/sections.json --embed --require-verified
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-code-index
+          path: ${{ runner.temp }}/code-index/inspections.sqlite3
+          retention-days: 7
