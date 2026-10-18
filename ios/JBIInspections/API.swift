@@ -41,7 +41,7 @@ struct API {
         }
         guard !token.isEmpty else { throw APIError(message: "Set the backend API token in Settings.") }
         var req = URLRequest(url: url)
-        req.httpMethod = method; req.httpBody = body; req.timeoutInterval = 180
+        req.httpMethod = method; req.httpBody = body; req.timeoutInterval = path.hasSuffix("/analyze") ? 360 : 180
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(mime, forHTTPHeaderField: "Content-Type")
         headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }

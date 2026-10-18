@@ -101,7 +101,7 @@ M00981443-I1 SF
                'references':[{'reference_id':'invented','quote':'unsupported'},
                              {'reference_id':'test-reference','quote':'SYNTHETIC fixture only'}]}]})}}]})
         with patch('backend.app.httpx.AsyncClient',return_value=provider):
-            result=self.client.post('/inspections/'+item['id']+'/analyze',headers=HEADERS,json={'consent':True})
+            result=self.client.post('/inspections/'+item['id']+'/analyze',headers=HEADERS,json={'consent':True,'use_draft_references':False})
         self.assertEqual(result.status_code,200,result.text)
         self.assertFalse(result.json()['applied_to_report'])
         self.assertIsNone(result.json()['suggestions']['suggested_findings'][0]['photo_id'])

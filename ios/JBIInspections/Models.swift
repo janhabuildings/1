@@ -108,6 +108,7 @@ struct SuggestedFinding: Decodable, Identifiable {
     var source_quote: String
     var photo_id: String?
     var references: [SuggestedCitation]
+    var uncertainties: [String]?
 }
 struct AISuggestionSet: Decodable {
     var suggested_findings: [SuggestedFinding]
@@ -122,7 +123,10 @@ struct SuggestedCitation: Decodable, Identifiable {
     var id: String { reference_id + quote }
     var reference_id: String
     var quote: String
-    var url: String
+    var url: String?
     var agency: String
     var section: String
+    var verified: Bool?
+    var source_pages: [Int]?
+    var document: String?
 }

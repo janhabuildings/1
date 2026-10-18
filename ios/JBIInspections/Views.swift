@@ -96,9 +96,11 @@ struct InspectionDetail: View {
     @State private var importFile = false
     @State private var recordConsent = false
     @State private var aiConsent = false
+    @State private var selectedAIPhotos: Set<String> = []
     @State private var busy = false
     @State private var suggestions = ""
     @State private var suggestedFindings: [SuggestedFinding] = []
+    @State private var analysisChecks: [String] = []
     @State private var calendarCandidates: CalendarCandidates?
     @State private var export: ExportResult?
     @State private var share: SharedItems?
@@ -121,6 +123,11 @@ struct InspectionDetail: View {
                 NavigationLink("Search OSHA / DOB / SCA library") { CodeSearchView(onDate: inspection.inspection_date) }
             }
             actions
+            if !analysisChecks.isEmpty {
+                Section("Confirm before using findings") {
+                    ForEach(analysisChecks, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+                }
+            }
             if !suggestedFindings.isEmpty {
                 Section("Review suggested findings") {
                     ForEach(suggestedFindings) { finding in
@@ -129,12 +136,24 @@ struct InspectionDetail: View {
                             Text(finding.location)
                             Text(finding.suggested_action)
                             if !finding.source_quote.isEmpty { Text("Source: \(finding.source_quote)").font(.caption) }
+                            ForEach(finding.uncertainties ?? [], id: \.self) { check in
+                                Text("Field confirmation: \(check)").font(.caption).foregroundStyle(.orange)
+                            }
                             ForEach(finding.references) { reference in
                                 Text("Reference for review: \(reference.agency) \(reference.section)").font(.caption)
                                 Text(reference.quote).font(.caption).italic()
-                                if let url = URL(string: reference.url), url.scheme == "https" { Link("Verify code source and applicability", destination: url) }
+                                if reference.verified == false {
+                                    Text("DRAFT · PDF pages \((reference.source_pages ?? []).map(String.init).joined(separator: ", ")) · applicability unverified").font(.caption).foregroundStyle(.orange)
+                                }
+                                if let source = reference.url, let url = URL(string: source), url.scheme == "https" { Link("Verify code source and applicability", destination: url) }
                             }
-                            if let photo = finding.photo_id { Text("Photo: \(photo)").font(.caption2) }
+                            if let photo = finding.photo_id {
+                                Text("Photo: \(photo)").font(.caption2)
+                                if let item = store.cache.media.first(where: { $0.id == photo }),
+                                   let image = UIImage(contentsOfFile: store.mediaURL(item).path) {
+                                    Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 160)
+                                }
+                            }
                             if ["SF", "SH"].contains(finding.equipment) {
                                 Button("Confirm and add as \(finding.equipment == "SF" ? "scaffold" : "shed") open item") {
                                     adopt(finding)
@@ -176,7 +195,7 @@ struct InspectionDetail: View {
         } message: { Text("Record only when participants are informed and applicable consent requirements are met. Recording stops when you leave this screen or the app becomes inactive.") }
         .confirmationDialog("Send inspection data for AI analysis?", isPresented: $aiConsent, titleVisibility: .visible) {
             Button("Send notes, transcript and up to six photos") { analyze() }
-        } message: { Text("This sends calendar text, notes, transcript and the first six inspection photos to the backend's configured AI provider. Suggestions require your review and won't change your report.") }
+        } message: { Text("This sends calendar text, notes, transcript and up to six photos you select to the backend's configured AI provider. It also retrieves draft DOB/SCA references using the observed conditions. Confirm source applicability and field uncertainties before adopting a suggestion.") }
     }
     private var basics: some View {
         Section("Inspection") {
@@ -211,6 +230,11 @@ struct InspectionDetail: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if item.kind == "photo", let image = UIImage(contentsOfFile: store.mediaURL(item).path) {
                         Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 180)
+                        Toggle("Include photo in AI review", isOn: Binding(
+                            get: { selectedAIPhotos.contains(item.id) },
+                            set: { value in
+                                if value { selectedAIPhotos.insert(item.id) } else { selectedAIPhotos.remove(item.id) }
+                            }))
                     } else { Label("Audio recording", systemImage: "waveform") }
                     Picker("Equipment", selection: $store.cache.media[index].equipment) {
                         Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH")
@@ -355,16 +379,19 @@ struct InspectionDetail: View {
         calendarCandidates = nil; status = "Calendar candidates added as draft facts. Review each report and confirm the result and drawing status."
     }
     private func analyze() {
+        suggestedFindings = []; analysisChecks = []
         Task {
             busy = true; defer { busy = false }
             do {
+                guard selectedAIPhotos.count <= 6 else { throw APIError(message: "Select at most six photos for AI review.") }
                 store.save(inspection); try await store.sync(inspection)
-                let ids = store.cache.media.filter { $0.inspectionID == inspection.id && $0.kind == "photo" }.prefix(6).map(\.id)
+                let ids = store.cache.media.filter { $0.inspectionID == inspection.id && $0.kind == "photo" && selectedAIPhotos.contains($0.id) }.map(\.id)
                 let data = try await store.api.json("/inspections/\(inspection.id)/analyze", object: ["consent": true, "media_ids": Array(ids)])
-                suggestedFindings = try JSONDecoder().decode(AISuggestionResponse.self, from: data).suggestions.suggested_findings
-                let object = try JSONSerialization.jsonObject(with: data)
-                let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
-                suggestions = String(data: pretty, encoding: .utf8) ?? ""
+                let analysis = try JSONDecoder().decode(AISuggestionResponse.self, from: data).suggestions
+                suggestedFindings = analysis.suggested_findings
+                analysisChecks = Array(Set(analysis.warnings + analysis.missing_information)).sorted()
+                if suggestedFindings.isEmpty { analysisChecks.append("No findings suggested. This does not establish No OIs.") }
+                suggestions = ""
             } catch { store.error = error.localizedDescription }
         }
     }
@@ -375,7 +402,11 @@ struct InspectionDetail: View {
         inspection.reports[index].open_items.append(Finding(location: finding.location, action: finding.suggested_action))
         if let photo = finding.photo_id { inspection.reports[index].photo_references.append(photo) }
         inspection.reports[index].source_references.append(finding.source_quote)
-        for reference in finding.references { inspection.reports[index].source_references.append("\(reference.agency) \(reference.section): \(reference.url)") }
+        for reference in finding.references {
+            let status = reference.verified == false ? "DRAFT; applicability unverified" : "Reference for review"
+            let pages = (reference.source_pages ?? []).map(String.init).joined(separator: ", ")
+            inspection.reports[index].source_references.append("\(status): \(reference.agency) \(reference.section) · PDF pages \(pages) · \(reference.url ?? reference.document ?? "Uploaded source") · \(reference.quote)")
+        }
         suggestedFindings.removeAll { $0.id == finding.id }
     }
     private func generate() {

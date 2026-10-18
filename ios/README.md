@@ -59,3 +59,9 @@ For installation without your own Mac, the planned distribution route is TestFli
 The iPhone reference search includes **Reviewed sources**, **NYC DOB Chapter 33 · draft**, and **NYC SCA Safety Manual · draft**. Draft results retain their agency, PDF pages, parent-section context and edition warnings, and do not imply effective-date approval. Semantic search additionally requires `AI_API_KEY` in Render, not in the iPhone app.
 
 First physical-device checks: camera permission and capture; microphone consent/recording and app interruption; on-device transcription; offline note/photo persistence; sync after Render wakes up; SF/SH report generation and file downloads; code searches; and HTML Mail draft with the correct PDF attachment. A successful cloud compile alone does not verify these behaviors.
+
+## Photo review with DOB/SCA references
+
+In an inspection's evidence list, turn on **Include photo in AI review** for up to six photographs. Add actual equipment/location notes, then start analysis and confirm data sharing. The backend first observes the selected photos, searches the uploaded DOB and SCA vector libraries, and returns possible deficiencies with exact supporting excerpts, PDF page references and field-confirmation checks. A photo thumbnail appears alongside a linked suggestion. Draft source warnings and missing information are shown separately from findings.
+
+**Confirm and add as open item** is still required. It copies reviewed text, photo references and provisional citation details into that equipment's draft; it never selects No OIs. Edit findings in the report editor before generating the report. Changing a report is a separate user action; analysis alone never changes it. Both observations and applicable source requirements need inspector review. Actual photo-analysis quality and Mail/camera interactions still require field/device validation.
