@@ -1,0 +1,48 @@
+name: Embed NYC Chapter 33 (draft)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nyc-chapter33-embedding
+  cancel-in-progress: false
+jobs:
+  embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check embedding credential
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        run: |
+          if [ -z "$AI_API_KEY" ]; then
+            echo 'Add the AI_API_KEY repository Actions secret before running this workflow.'
+            exit 1
+          fi
+      - run: pip install -r backend/requirements-ingest.txt
+      - name: Extract source with page and section references
+        run: python -m backend.stage_pdf code_library/sources/nyc-2022-chapter33.pdf --output "${{ runner.temp }}/chapter33"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vectors
+          key: chapter33-small-v1-${{ hashFiles('code_library/sources/nyc-2022-chapter33.pdf', 'backend/stage_pdf.py', 'backend/embed_staged.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chapter33-small-v1-${{ hashFiles('code_library/sources/nyc-2022-chapter33.pdf', 'backend/stage_pdf.py', 'backend/embed_staged.py') }}-
+      - name: Generate draft vectors (resumes cached chunks)
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          EMBEDDING_MODEL: text-embedding-3-small
+        run: python -m backend.embed_staged "${{ runner.temp }}/chapter33" "${{ runner.temp }}/vectors/chapter33.draft.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nyc-chapter33-draft-vectors
+          path: |
+            ${{ runner.temp }}/chapter33
+            ${{ runner.temp }}/vectors
+          if-no-files-found: ignore
+          retention-days: 30
