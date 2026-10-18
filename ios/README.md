@@ -1,4 +1,4 @@
-# JBI Inspections iPhone app — first implementation
+# JBI Inspections iPhone app
 
 Open **JBIInspections.xcodeproj** directly in Xcode 16 or later. It targets iOS 17+, uses SwiftUI and Apple system frameworks, and has no external Swift packages. The same checked-in source/project is compiled on the Mac; it does not need to be rewritten. `scripts/create_xcode_project.py` deterministically regenerates the project when source files are added.
 
@@ -17,7 +17,7 @@ Open **JBIInspections.xcodeproj** directly in Xcode 16 or later. It targets iOS 
 
 5. Deploy/configure the backend using `backend/README.md`. In the app's Settings enter its HTTPS URL and API token, then tap Test connection. The API token is stored in Keychain, not in the app binary.
 
-There is no Xcode/Swift compiler in the current Linux environment. Swift syntax parsing and Xcode project/plist structure are checked here; this is **not** a compiled or device-tested iOS build. Signing, permission prompts, audio behavior, UI typechecking, Mail behavior and TestFlight still need Mac/device validation. App Store screenshots, privacy disclosures and production release assets are not completed.
+The current Linux environment has no Xcode, but GitHub macOS build run [39094950491](https://github.com/janhabuildings/1/actions/runs/39094950491) successfully compiled the simulator app from commit `20d8359`. Local Swift syntax and Xcode project/plist checks also passed. This verifies compilation and SwiftUI typechecking, not a signed physical-device build or real-device behavior. Signing, permission prompts, audio behavior, Mail behavior and TestFlight still need validation. App Store screenshots, privacy disclosures and production release assets are not completed.
 
 ## Field workflow
 
@@ -41,3 +41,21 @@ Files use iOS data protection and a device-only Keychain credential. Keep phone 
 ## Report fidelity
 
 Original DOCX templates are preserved by the shared generator. Linux PDF rendering still substitutes unavailable font faces and can wrap cells or add a footer-only page. This app does not magically fix those fonts. Outputs remain unsigned review drafts. Final fonts/page breaks, email HTML layout and PE signature/seal must be verified before client delivery. Photos are evidence for reviewed findings and retained as references; this version does not create a formatted photo appendix in the DOCX.
+
+## iPhone development with no local Mac
+
+Render remains the backend. No Windows server or local backend is required. The app defaults to `https://jbi-inspections.onrender.com`; enter the existing Render `INSPECTION_API_TOKEN` in iPhone Settings and save/test the connection. The token stays in Keychain. Render Free may take time to wake up after inactivity.
+
+GitHub Actions **Build iPhone app** compiles the checked-in Xcode project on a GitHub-hosted Mac when iOS source changes are pushed, or on manual dispatch. It uploads an unsigned simulator app and build log. This verifies compilation without renting a Mac; GitHub-hosted macOS minutes are subject to the repository's Actions allowance and billing settings. A simulator app cannot be installed on an actual iPhone.
+
+For installation without your own Mac, the planned distribution route is TestFlight:
+
+1. Enroll in the [Apple Developer Program](https://developer.apple.com/programs/enroll/) if needed (Apple generally charges US$99 per membership year; local pricing and eligibility vary).
+2. Register the app's bundle ID and create its App Store Connect record under your own account.
+3. Configure distribution signing and provisioning for a cloud device archive. Keep certificates, private keys and App Store Connect API credentials in secure CI secrets, never source code or chat. No release-signing workflow or credentials have been configured yet.
+4. Complete release assets, including the app icon and required privacy/export-compliance details, and validate an iPhone archive before uploading it to App Store Connect.
+5. Install Apple's TestFlight app on the iPhone and accept the invitation after the build is processed. External testing may require Beta App Review; internal testing depends on App Store Connect access. TestFlight builds expire after 90 days.
+
+The iPhone reference search includes **Reviewed sources**, **NYC DOB Chapter 33 · draft**, and **NYC SCA Safety Manual · draft**. Draft results retain their agency, PDF pages, parent-section context and edition warnings, and do not imply effective-date approval. Semantic search additionally requires `AI_API_KEY` in Render, not in the iPhone app.
+
+First physical-device checks: camera permission and capture; microphone consent/recording and app interruption; on-device transcription; offline note/photo persistence; sync after Render wakes up; SF/SH report generation and file downloads; code searches; and HTML Mail draft with the correct PDF attachment. A successful cloud compile alone does not verify these behaviors.
