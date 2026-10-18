@@ -18,7 +18,7 @@ import Foundation
             }
         } catch { self.error = "Local storage: \(error.localizedDescription)" }
     }
-    var api: API { API(baseURL: UserDefaults.standard.string(forKey: "backendURL") ?? "", token: SecureToken.read()) }
+    var api: API { API(baseURL: UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL, token: SecureToken.read()) }
     func persist() {
         do { try JSONEncoder().encode(cache).write(to: directory.appendingPathComponent("cache.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
         catch { self.error = "Could not save inspection: \(error.localizedDescription)" }

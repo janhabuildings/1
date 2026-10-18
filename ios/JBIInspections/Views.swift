@@ -52,7 +52,7 @@ struct InspectionList: View {
 }
 
 struct SettingsView: View {
-    @AppStorage("backendURL") private var backendURL = ""
+    @AppStorage("backendURL") private var backendURL = API.defaultBaseURL
     @State private var token = SecureToken.read()
     @State private var result = ""
     @Environment(\.dismiss) var dismiss
@@ -60,7 +60,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Private backend") {
-                    TextField("https://your-service.onrender.com", text: $backendURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Render backend URL", text: $backendURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Backend API token", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Save connection") {
                         do { try SecureToken.save(token); result = "Saved. Credentials stay in this phone's Keychain." }

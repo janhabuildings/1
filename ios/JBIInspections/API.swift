@@ -29,6 +29,7 @@ enum SecureToken {
     }
 }
 struct API {
+    static let defaultBaseURL = "https://jbi-inspections.onrender.com"
     let baseURL: String
     let token: String
     func request(_ path: String, method: String = "GET", body: Data? = nil,

@@ -81,10 +81,13 @@ struct CodeHit: Decodable, Identifiable {
     var section: String
     var title: String
     var text: String
-    var url: String
-    var effective_from: String
+    var url: String?
+    var effective_from: String?
     var effective_to: String?
     var retrieval: String
+    var verified: Bool?
+    var source_pages: [Int]?
+    var parent_sections: [String]?
 }
 struct CodeResponse: Decodable { var mode: String; var results: [CodeHit]; var notice: String }
 struct CodeSearchView: View {
@@ -92,19 +95,30 @@ struct CodeSearchView: View {
     var onDate: String
     @State private var query = ""
     @State private var semantic = false
+    @State private var library = "reviewed"
     @State private var response: CodeResponse?
     @State private var busy = false
     var body: some View {
         List {
             Section("Reference library") {
+                Picker("Library", selection: $library) {
+                    Text("Reviewed sources").tag("reviewed")
+                    Text("NYC DOB Chapter 33 · draft").tag("chapter33")
+                    Text("NYC SCA Safety Manual · draft").tag("sca-manual")
+                }.disabled(busy)
                 TextField("Condition or section number", text: $query)
                 Toggle("Semantic search · sends query to AI provider", isOn: $semantic)
-                Text("Applicable date: \(onDate). Only reviewed sources effective on this date are returned.").font(.caption)
+                if library == "reviewed" {
+                    Text("Applicable date: \(onDate). Only reviewed sources effective on this date are returned.").font(.caption)
+                } else {
+                    Text("Uploaded draft reference. Source edition and effective dates have not been reviewed; results are not filtered by date.").font(.caption).foregroundStyle(.orange)
+                }
                 Button(busy ? "Searching…" : "Search") {
                     Task {
                         busy = true; defer { busy = false }
                         do {
-                            let data = try await store.api.json("/codes/search", object: ["query": query, "on_date": onDate, "semantic": semantic])
+                            let endpoint = library == "reviewed" ? "/codes/search" : "/codes/draft/search"
+                            let data = try await store.api.json(endpoint, object: ["query": query, "on_date": onDate, "semantic": semantic, "library": library])
                             response = try JSONDecoder().decode(CodeResponse.self, from: data)
                         } catch { store.error = error.localizedDescription }
                     }
@@ -112,17 +126,25 @@ struct CodeSearchView: View {
             }
             if let response {
                 Section { Text(response.notice).font(.caption) }
-                if response.results.isEmpty { Text("No matching reviewed sections are indexed. No compliance conclusion can be drawn.") }
+                if response.results.isEmpty { Text("No matching sections in this library. No compliance conclusion can be drawn.") }
                 ForEach(response.results) { hit in
                     Section {
                         Text("\(hit.agency) · \(hit.section)").font(.headline)
                         Text(hit.title).font(.subheadline)
                         Text(hit.text).textSelection(.enabled)
-                        Text("Effective \(hit.effective_from) · \(hit.retrieval)").font(.caption)
-                        if let url = URL(string: hit.url), url.scheme == "https" { Link("View authoritative source", destination: url) }
+                        if hit.verified == false {
+                            Text("DRAFT · PDF pages \((hit.source_pages ?? []).map(String.init).joined(separator: ", ")) · \(hit.retrieval)").font(.caption).foregroundStyle(.orange)
+                            if let parents = hit.parent_sections, !parents.isEmpty {
+                                Text("Parent sections: \(parents.joined(separator: ", "))").font(.caption)
+                            }
+                        } else {
+                            Text("Effective \(hit.effective_from ?? "unconfirmed") · \(hit.retrieval)").font(.caption)
+                        }
+                        if let source = hit.url, let url = URL(string: source), url.scheme == "https" { Link("View authoritative source", destination: url) }
                     }
                 }
             }
         }.navigationTitle("Code references")
+            .onChange(of: library) { _, _ in response = nil }
     }
 }
