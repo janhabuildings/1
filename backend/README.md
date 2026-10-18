@@ -26,9 +26,9 @@ The iPhone requires an HTTPS backend URL (simulator localhost HTTP is allowed fo
 
 ## Render deployment
 
-`render.yaml` describes a Docker web service using `backend/Dockerfile`, a generated API token and a persistent 5 GB disk mounted at `/var/data`. It requires a paid disk-capable service; pricing is not quoted here. Use a private repository and review the blueprint before creating billable resources. This session has not pushed code or deployed Render resources.
+`render.yaml` now selects Render’s **free plan**, uses `backend/Dockerfile`, generates an API token and stores test data in `/tmp/jbi-inspections`. There is no persistent disk. Code is on GitHub; no Render service has been deployed from this session. Select the `main` branch and verify the plan says Free before deployment.
 
-The disk retains SQLite records, photos/audio and report outputs across restarts. Do not use ephemeral container storage for actual client records. Keep one service instance attached to the disk; multi-replica storage/concurrency, backups, retention policies and multi-user login are future production work. A hosted object store/database can be added later if needed without changing the iOS capture workflow.
+**Test storage is temporary:** SQLite records, uploaded photos/audio, imported code indexes and generated reports can disappear on restart or redeployment. Keep originals on your phone/computer and download reports promptly. The free service may sleep while idle, and startup/PDF conversion can be slow or exceed free-plan resource limits. Do not rely on it as the only copy of client records. AI API usage is billed separately. For ongoing use, add durable storage (a paid disk or an external storage/database service) and a backup/retention plan. The optional local Docker volume example below remains useful for durable local development; it is not included in the free Render blueprint.
 
 Docker commands for a local validation build:
 

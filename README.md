@@ -47,7 +47,7 @@ Original DOCX template package parts outside the populated main document are pre
 
 ## Storage and access
 
-Photos/audio, notes and exports stay in protected local app storage until explicit synchronization. The backend uses a private data directory with SQLite, media and report files, authenticated by a single-operator bearer token stored in the phone's Keychain. Render needs a persistent disk for this deployment. Client credentials, live inspection content and generated files must not be committed. AI is optional and requires explicit data-sharing confirmation; it never silently processes recordings or finalizes a report.
+Photos/audio, notes and exports stay in protected local app storage until explicit synchronization. The backend uses a private data directory with SQLite, media and report files, authenticated by a single-operator bearer token stored in the phone's Keychain. The Render blueprint uses the free plan for testing, with temporary server storage that can be lost on restart/redeployment. Keep original media on the phone/computer and download reports; ongoing use requires durable storage. Client credentials, live inspection content and generated files must not be committed. AI is optional and requires explicit data-sharing confirmation; it never silently processes recordings or finalizes a report.
 
 ## Existing report generator and plugin
 
