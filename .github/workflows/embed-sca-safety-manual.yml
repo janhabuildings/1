@@ -1,0 +1,51 @@
+name: Embed SCA Safety Manual (draft)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [code_library/sources/sca-safety-manual-january-2026.pdf]
+permissions:
+  contents: read
+concurrency:
+  group: sca-safety-manual-embedding
+  cancel-in-progress: false
+jobs:
+  embed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check embedding credential
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        run: |
+          if [ -z "$AI_API_KEY" ]; then
+            echo 'Add the AI_API_KEY repository Actions secret before running this workflow.'
+            exit 1
+          fi
+      - run: pip install -r backend/requirements-ingest.txt
+      - name: Extract source with page and section references
+        run: python -m backend.stage_sca code_library/sources/sca-safety-manual-january-2026.pdf --output "${{ runner.temp }}/sca-manual"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vectors
+          key: sca-manual-small-v1-${{ hashFiles('code_library/sources/sca-safety-manual-january-2026.pdf', 'backend/stage_sca.py', 'backend/embed_staged.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            sca-manual-small-v1-${{ hashFiles('code_library/sources/sca-safety-manual-january-2026.pdf', 'backend/stage_sca.py', 'backend/embed_staged.py') }}-
+      - name: Generate draft vectors (resumes cached chunks)
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          EMBEDDING_MODEL: text-embedding-3-small
+        run: python -m backend.embed_staged "${{ runner.temp }}/sca-manual" "${{ runner.temp }}/vectors/sca-manual.draft.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sca-safety-manual-draft-vectors
+          path: |
+            ${{ runner.temp }}/sca-manual
+            ${{ runner.temp }}/vectors
+          if-no-files-found: ignore
+          retention-days: 30
