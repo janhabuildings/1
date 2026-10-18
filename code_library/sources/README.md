@@ -29,3 +29,11 @@ GitHub Actions run `39091244250` completed successfully. All 951 vectors (1536 d
 In the browser Code reference library, select **Search uploaded NYC Chapter 33 draft (unreviewed)**. Keyword search works immediately. Semantic search additionally requires `AI_API_KEY` in Render Environment settings, with the default `text-embedding-3-small` model. The Actions secret is not automatically shared with Render. Only the query is sent for search embedding; stored vectors are reused.
 
 The authenticated `/codes/draft/search` endpoint returns section text, parent references and PDF page numbers with explicit draft flags. It does not filter by effective date, populate the reviewed SQLite index, or feed draft references into report analysis.
+
+## SCA Safety Manual upload
+
+`sca-safety-manual-january-2026.pdf` is the uploaded 155-page manual (SHA-256 `c8dc63a3204e39ec29cf6fe00eb1f5d113c9f47f4fae6d0c100c2ee05e7d018d`). Its filename says January 2026; internal headers say SCA Safety Programs 2025. Source edition, effective dates and project applicability are not verified.
+
+The dedicated `backend.stage_sca` extractor detects all 21 chapters, keeps numbered sections and continued headings, and preserves unnumbered headings within parent text. All extracted page text is retained in staging. Cover/table of contents are retained for audit and excluded from the 293 embedding chunks. PDF page numbers are physical file pages, not the printed footer page numbers.
+
+Actions workflow **Embed SCA Safety Manual (draft)** ran successfully as run `39094105461`. Its artifact is `sca-safety-manual-draft-vectors`, retained for 30 days. The artifact is not yet bundled into Render: downloading it in this session requires the additional allowed host `productionresultssa0.blob.core.windows.net`. The existing Chapter 33 app library is unchanged. After retrieval, validate every vector and source/chunk hash before packaging a separate SCA preview library. Do not label these provisions as NYC DOB rules or infer effective dates from the filename.
