@@ -96,3 +96,14 @@ python -m backend.stage_pdf /path/to/code.pdf --output /new/private/staging-dire
 ```
 
 This preserves `source.pdf` with SHA-256, complete extracted text per PDF page, numbered section records, parent-section references and bounded retrieval chunks with exact character/page spans. It does not read document instructions as commands, assign guessed effective dates, declare source verification or call an embedding API. Tables/figures and cross-page conditions still require visual comparison. Review JSON is deliberately distinct from the approved `ingest_codes` format; do not rename it and mark everything verified. Approving chunks requires source URL/date provenance and contextual retrieval of complete provisions, exceptions and parents. The current active search index is not modified by staging.
+
+
+### Browser workspace for Windows testing
+
+Open the service root URL after deployment. Public static UI files contain no private inspection data or credentials. Connect using `INSPECTION_API_TOKEN` from Render's Environment settings; the token is sent as a same-origin bearer header, never a query string, cookie, localStorage or sessionStorage entry. The workspace is cleared on disconnect. Authenticated data/download routes still require the token, and responses use no-store headers. External scripts/CDNs are not used; the content security policy disallows script evaluation and embedding by other sites.
+
+Workflow: connect → create/open an inspection → paste calendar text and review candidates → enter actual attendees → upload and label evidence → add scaffold/shed report facts and explicit outcomes → generate → download DOCX, PDF, HTML or unsent EML. Existing transcripts can be imported as UTF-8 TXT. Optional AI analysis sends only consented text and selected photos, with at most six images. It does not transcribe audio recordings. The reference tab clearly reports an empty library until reviewed sections are ingested.
+
+This page is a testing UI, not a native iOS simulator. Report-formatting/signature review, temporary free-tier storage and external AI configuration limits still apply. Email files preserve MIME/HTML/attachments for local review; they are not automatically inserted into Gmail or Outlook.
+
+Browser checks use Playwright and Chromium. `backend/requirements-dev.txt` includes Playwright; install its Chromium browser with `playwright install chromium` where a system Chromium is not available. Browser tests exercise wrong-token rejection, nonpersistent credentials, calendar candidate confirmation without inferred outcomes, actual photo upload, both report workflows and a real PDF download. They use temporary local test data, not the deployed Render API token.

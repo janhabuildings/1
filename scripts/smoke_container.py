@@ -24,6 +24,11 @@ for _ in range(100):
    if json.load(r)['status']=='ok': break
  except OSError: time.sleep(.1)
 else: raise RuntimeError('Container did not become ready')
+with urllib.request.urlopen(base+'/',timeout=10) as response:
+ assert b'JBI Inspection Workspace' in response.read()
+ assert response.headers['Cache-Control']=='no-store'
+with urllib.request.urlopen(base+'/web/app.js',timeout=10) as response:
+ assert os.environ['INSPECTION_API_TOKEN'].encode() not in response.read()
 headers={'Authorization':'Bearer '+os.environ['INSPECTION_API_TOKEN'],'Content-Type':'application/json'}
 def call(path,obj=None):
  req=urllib.request.Request(base+path,headers=headers,data=json.dumps(obj).encode() if obj is not None else None)

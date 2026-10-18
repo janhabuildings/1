@@ -16,6 +16,12 @@ Native iPhone app and configurable report backend for scaffold/shed field inspec
 
 The reference corpus starts empty; the existing JBI drawing-review repository was not provided, so this is a new configurable index, not a verified reuse of that app. Direct Gmail API draft creation and Twilio/WhatsApp Business inbound messaging are not implemented in this first iOS version. The app uses Apple's Mail composer and share sheet instead.
 
+## Browser testing on Windows
+
+The backend now serves a browser workspace at its root URL, including `https://jbi-inspections.onrender.com/` after Render deploys this revision. Enter the service's `INSPECTION_API_TOKEN` in the password field; do not share it in chat. It stays only in page memory and is cleared on reload/disconnect, with no local/session storage. The page supports manual inspections, calendar candidates, attendee/report forms, evidence uploads, optional reviewed AI suggestions, code search and actual authenticated report downloads. It does not send mail or create mailbox drafts. Browser audio support is file upload and transcript import, not recording/transcription.
+
+Keep original evidence locally. Free Render storage is temporary; download reports and optionally an inspection JSON backup. The JSON backup does not contain photo/audio bytes. A server restart can remove saved inspections and file links. AI features require backend configuration; the code index remains empty until approved content is ingested.
+
 ## Start here
 
 - [iPhone / Xcode instructions](ios/README.md)

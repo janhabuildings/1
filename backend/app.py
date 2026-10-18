@@ -13,6 +13,7 @@ from typing import Literal
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from backend.core import Settings, Store, calendar_candidates, embed, search_codes, uid
@@ -114,6 +115,22 @@ def create_app(settings=None):
     app=FastAPI(title='JBI Inspections',version='0.1.0',docs_url=None,redoc_url=None)
     app.state.store=store
     app.state.settings=settings
+    web_root=Path(__file__).resolve().parent/'web'
+    app.mount('/web',StaticFiles(directory=web_root),name='web')
+
+    @app.middleware('http')
+    async def response_headers(request,call_next):
+        response=await call_next(request)
+        response.headers['Cache-Control']='no-store'
+        response.headers['X-Content-Type-Options']='nosniff'
+        response.headers['Referrer-Policy']='no-referrer'
+        response.headers['Content-Security-Policy']=("default-src 'self'; script-src 'self'; "
+            "style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; "
+            "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        return response
+
+    @app.get('/',include_in_schema=False)
+    def workspace(): return FileResponse(web_root/'index.html',media_type='text/html')
 
     @app.exception_handler(KeyError)
     async def missing(request,error):
