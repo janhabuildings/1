@@ -98,6 +98,10 @@ class SearchInput(BaseModel):
     semantic: bool = False
 
 
+class DraftSearchInput(SearchInput):
+    library: Literal['chapter33','sca-manual'] = 'chapter33'
+
+
 class UploadInfo(BaseModel):
     note: str = Field(default='',max_length=5000)
     equipment: Literal['','SF','SH'] = ''
@@ -231,17 +235,18 @@ def create_app(settings=None):
         return FileResponse(record['path'],media_type=record['mime'],filename=record['filename'])
 
     @app.post('/codes/draft/search',dependencies=[Depends(authorized)])
-    async def draft_search(data:SearchInput):
-        from backend.draft_codes import search as search_draft, NOTICE
+    async def draft_search(data:DraftSearchInput):
+        from backend.draft_codes import search as search_draft, load as load_draft, NOTICE
         vector=None
         if data.semantic:
             if not settings.ai_key: raise HTTPException(503,'Set AI_API_KEY in Render Environment settings to enable semantic search')
             try: vector=await embed(settings,data.query)
             except httpx.HTTPError: raise HTTPException(502,'Embedding provider request failed')
-        try: results=search_draft(data.query,vector,settings.embedding_model)
+        try: results=search_draft(data.query,vector,settings.embedding_model,library=data.library)
         except ValueError as error: raise HTTPException(503,str(error))
         return {'mode':'draft hybrid' if vector is not None else 'draft keyword',
-                'results':results,'notice':NOTICE,'verified':False}
+                'results':results,'notice':NOTICE+' '+load_draft(data.library)['source_manifest'].get('edition_note',''),
+                'library':data.library,'verified':False}
 
     @app.post('/codes/search',dependencies=[Depends(authorized)])
     async def search(data:SearchInput):

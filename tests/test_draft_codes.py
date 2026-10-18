@@ -18,6 +18,17 @@ class DraftCodesTests(unittest.TestCase):
         self.assertTrue(search('chapter', vector, data['model']))
         with self.assertRaises(ValueError): search('chapter',vector,'different-model')
 
+    def test_sca_vectors_and_library_isolation(self):
+        data=load('sca-manual')
+        self.assertEqual((len(data['records']),data['dimensions']),(293,1536))
+        matches=search('scaffold toeboard',library='sca-manual')
+        self.assertTrue(any(r['section']=='11.2' for r in matches))
+        self.assertTrue(all(r['agency']=='NYC SCA' for r in matches))
+        self.assertTrue(all(r['agency']=='NYC DOB' for r in search('scaffold')))
+        vector=list(data['records'][20]['embedding'])
+        self.assertTrue(search('scaffold',vector,data['model'],library='sca-manual'))
+        with self.assertRaises(ValueError): search('scaffold',library='../outside')
+
     def test_protected_preview_excluded_from_reviewed_index(self):
         with tempfile.TemporaryDirectory() as directory:
             settings=Settings(Path(directory),'fixture-token')
@@ -30,5 +41,13 @@ class DraftCodesTests(unittest.TestCase):
                 self.assertFalse(response.json()['verified'])
                 self.assertTrue(response.json()['results'])
                 self.assertEqual(search_codes(Store(settings.data_dir),'scaffold','2026-10-18'),[])
+                body['library']='sca-manual'
+                response=client.post('/codes/draft/search',headers=headers,json=body)
+                self.assertEqual(response.status_code,200)
+                self.assertIn('2025',response.json()['notice'])
+                self.assertTrue(all(r['agency']=='NYC SCA' for r in response.json()['results']))
+                body['library']='unknown'
+                self.assertEqual(client.post('/codes/draft/search',headers=headers,json=body).status_code,422)
+                body['library']='sca-manual'
                 body['semantic']=True
                 self.assertEqual(client.post('/codes/draft/search',headers=headers,json=body).status_code,503)

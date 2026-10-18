@@ -109,6 +109,11 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#search').click()
         expect(self.page.locator('#code-results')).to_contain_text('DRAFT · PDF pages')
         expect(self.page.locator('#code-results')).to_contain_text('3314')
+        self.page.locator('#draft-library').select_option('sca-manual')
+        self.page.locator('#search').click()
+        expect(self.page.locator('#code-results')).to_contain_text('NYC SCA')
+        expect(self.page.locator('#code-results')).to_contain_text('11.2')
+        expect(self.page.locator('#code-results')).to_contain_text('2025')
         self.assertEqual(self.errors,[])
         self.assertEqual(self.page.evaluate('localStorage.length'),0)
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
