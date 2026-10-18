@@ -103,7 +103,12 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('[data-tab=library]').click()
         self.page.locator('#code-query').fill('toeboard')
         self.page.locator('#search').click()
-        expect(self.page.locator('#code-results')).to_contain_text('No matching reviewed sections')
+        expect(self.page.locator('#code-results')).to_contain_text('No matching sections found')
+        self.page.locator('#draft-codes').check()
+        self.page.locator('#code-query').fill('toeboard scaffold')
+        self.page.locator('#search').click()
+        expect(self.page.locator('#code-results')).to_contain_text('DRAFT · PDF pages')
+        expect(self.page.locator('#code-results')).to_contain_text('3314')
         self.assertEqual(self.errors,[])
         self.assertEqual(self.page.evaluate('localStorage.length'),0)
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):

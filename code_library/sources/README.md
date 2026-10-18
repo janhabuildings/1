@@ -21,3 +21,11 @@ python -m backend.embed_staged /tmp/chapter33 /tmp/chapter33-vectors/chapter33.d
 ```
 
 Repeat the second command with the same file to resume. No inspection records, photos, email data or credentials are sent by this job; it embeds only the uploaded code text.
+
+## Bundled Render preview
+
+GitHub Actions run `39091244250` completed successfully. All 951 vectors (1536 dimensions) were validated against the extracted chunks and source PDF hash. Its compressed vector artifact and checksum are bundled in `backend/data/`, which the Docker image includes. This keeps the index available across Render Free redeploys without runtime artifact downloads or persistent disks.
+
+In the browser Code reference library, select **Search uploaded NYC Chapter 33 draft (unreviewed)**. Keyword search works immediately. Semantic search additionally requires `AI_API_KEY` in Render Environment settings, with the default `text-embedding-3-small` model. The Actions secret is not automatically shared with Render. Only the query is sent for search embedding; stored vectors are reused.
+
+The authenticated `/codes/draft/search` endpoint returns section text, parent references and PDF page numbers with explicit draft flags. It does not filter by effective date, populate the reviewed SQLite index, or feed draft references into report analysis.
