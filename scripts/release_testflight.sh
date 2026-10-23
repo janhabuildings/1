@@ -23,8 +23,17 @@ stage="decoding signing files"
 python3 - <<'PY'
 import base64,os,pathlib
 root=pathlib.Path(os.environ['RELEASE_DIR'])
+invalid=False
 for name,file in [('APPLE_CERTIFICATE_BASE64','certificate.p12'),('APPLE_PROFILE_BASE64','profile.mobileprovision')]:
-    (root/file).write_bytes(base64.b64decode(''.join(os.environ[name].split()),validate=True))
+    try:
+        decoded=base64.b64decode(''.join(os.environ[name].split()),validate=True)
+        if not decoded or decoded[0] != 0x30:
+            raise ValueError('Expected a binary signing file')
+        (root/file).write_bytes(decoded)
+    except (ValueError,UnicodeError):
+        print('::error::'+name+' must contain Base64 of the complete binary signing file. Recopy it from PowerShell, without quotes or commands.',flush=True)
+        invalid=True
+if invalid: raise SystemExit(1)
 (root/'AuthKey.p8').write_text(os.environ['ASC_PRIVATE_KEY'])
 PY
 stage="importing the distribution certificate into the temporary keychain"
