@@ -10,10 +10,12 @@ done
 release_dir=$(mktemp -d "$RUNNER_TEMP/jbi-release.XXXXXX")
 keychain="$release_dir/signing.keychain-db"
 profile_path=""
+legacy_profile_path=""
 private_key=""
 cleanup() {
   security delete-keychain "$keychain" >/dev/null 2>&1 || true
   if [ -n "$profile_path" ]; then rm -f "$profile_path"; fi
+  if [ -n "$legacy_profile_path" ]; then rm -f "$legacy_profile_path"; fi
   if [ -n "$private_key" ]; then rm -f "$private_key"; fi
   rm -rf "$release_dir"
 }
@@ -64,11 +66,17 @@ if p['ExpirationDate'] <= datetime.datetime.now(datetime.timezone.utc).replace(t
     'provisioningProfiles':{bundle:p['UUID']}}))
 PY
 profile_uuid=$(cat "$release_dir/profile-uuid")
-profile_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+profile_dir="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
 mkdir -p "$profile_dir"
 profile_path="$profile_dir/$profile_uuid.mobileprovision"
 if [ -e "$profile_path" ]; then profile_path=""; echo 'Profile already exists on runner; refusing to overwrite'; exit 1; fi
 cp "$release_dir/profile.mobileprovision" "$profile_path"
+legacy_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+mkdir -p "$legacy_dir"
+if [ ! -e "$legacy_dir/$profile_uuid.mobileprovision" ]; then
+  legacy_profile_path="$legacy_dir/$profile_uuid.mobileprovision"
+  cp "$release_dir/profile.mobileprovision" "$legacy_profile_path"
+fi
 key_dir="$HOME/.appstoreconnect/private_keys"
 mkdir -p "$key_dir"
 key_target="$key_dir/AuthKey_${ASC_KEY_ID}.p8"

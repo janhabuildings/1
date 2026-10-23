@@ -1,6 +1,6 @@
 # TestFlight setup without owning a Mac
 
-The app compiles on GitHub's macOS runners. The manual **Release iPhone app to TestFlight** workflow signs, archives and uploads it after the following account configuration. Enrollment alone does not supply signing credentials. No Apple credentials are in this repository and no TestFlight upload has been made.
+The app compiles on GitHub's macOS runners using the explicitly selected Xcode 26.3 toolchain, satisfying Apple's iOS 26 SDK upload requirement. The manual **Release iPhone app to TestFlight** workflow signs, archives and uploads it after the following account configuration. Enrollment alone does not supply signing credentials. No Apple credentials are in this repository and no TestFlight upload has been made.
 
 ## 1. Create the Apple app identity
 
