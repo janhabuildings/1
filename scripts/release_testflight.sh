@@ -2,8 +2,10 @@
 # Run only on a disposable GitHub macOS runner. No secrets are printed or uploaded as artifacts.
 set -euo pipefail
 umask 077
+stage="checking release configuration"
+trap 'code=$?; echo "::error::Release failed during $stage (exit $code). See the run step log for details."' ERR
 for name in APPLE_TEAM_ID APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_PROFILE_BASE64 ASC_KEY_ID ASC_ISSUER_ID ASC_PRIVATE_KEY RUNNER_TEMP GITHUB_RUN_NUMBER GITHUB_RUN_ATTEMPT; do
-  if [ -z "${!name:-}" ]; then echo "Missing secure release setting: $name"; exit 1; fi
+  if [ -z "${!name:-}" ]; then echo "::error::Missing secure release setting: $name"; exit 1; fi
 done
 release_dir=$(mktemp -d "$RUNNER_TEMP/jbi-release.XXXXXX")
 keychain="$release_dir/signing.keychain-db"
@@ -17,6 +19,7 @@ cleanup() {
 }
 trap cleanup EXIT
 export RELEASE_DIR="$release_dir"
+stage="decoding signing files"
 python3 - <<'PY'
 import base64,os,pathlib
 root=pathlib.Path(os.environ['RELEASE_DIR'])
@@ -24,6 +27,7 @@ for name,file in [('APPLE_CERTIFICATE_BASE64','certificate.p12'),('APPLE_PROFILE
     (root/file).write_bytes(base64.b64decode(''.join(os.environ[name].split()),validate=True))
 (root/'AuthKey.p8').write_text(os.environ['ASC_PRIVATE_KEY'])
 PY
+stage="importing the distribution certificate into the temporary keychain"
 password=$(openssl rand -hex 32)
 security create-keychain -p "$password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
@@ -31,6 +35,7 @@ security unlock-keychain -p "$password" "$keychain"
 security import "$release_dir/certificate.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain" >/dev/null
 security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+stage="decoding and validating the provisioning profile"
 security cms -D -i "$release_dir/profile.mobileprovision" > "$release_dir/profile.plist"
 python3 - <<'PY'
 import datetime,os,pathlib,plistlib,re
@@ -61,13 +66,16 @@ key_target="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
 if [ -e "$key_target" ]; then echo 'API key already exists on runner; refusing to overwrite'; exit 1; fi
 private_key="$key_target"
 cp "$release_dir/AuthKey.p8" "$private_key"
+stage="building the signed iPhone archive"
 build_number="$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
 xcodebuild -project ios/JBIInspections.xcodeproj -scheme JBIInspections -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$release_dir/JBI.xcarchive" \
   DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY='Apple Distribution' \
   PROVISIONING_PROFILE_SPECIFIER="$profile_uuid" CURRENT_PROJECT_VERSION="$build_number" archive
+stage="exporting the signed IPA"
 xcodebuild -exportArchive -archivePath "$release_dir/JBI.xcarchive" -exportOptionsPlist "$release_dir/ExportOptions.plist" -exportPath "$release_dir/export"
 ipa="$release_dir/export/JBIInspections.ipa"
 test -f "$ipa"
+stage="uploading the app to App Store Connect"
 xcrun iTMSTransporter -m upload -assetFile "$ipa" -apiKey "$ASC_KEY_ID" -apiIssuer "$ASC_ISSUER_ID"
 echo 'Upload finished. Check App Store Connect for processing, compliance questions and tester availability.'
