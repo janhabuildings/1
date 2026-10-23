@@ -41,7 +41,7 @@ function showSuggestions(result){const root=$('suggestions');root.replaceChildre
 
 $('connect-form').onsubmit=e=>{e.preventDefault();action(async()=>{state.token=$('token').value.trim();try{const cap=await json('/capabilities');$('token').value='';$('connection').hidden=true;$('workspace').hidden=false;$('capabilities').textContent=cap.cloud_ai_configured?'AI analysis is configured. All outputs require review.':'Manual workflow available. AI analysis is not configured.';reset();await refreshList();toast('Connected securely to this backend.');}catch(e){state.token='';throw e;}});};
 $('disconnect').onclick=()=>{if(state.dirty&&!confirm('Disconnect without saving the current changes?'))return;reset();state.token='';$('workspace').hidden=true;$('connection').hidden=false;$('token').value='';};
-document.querySelectorAll('[data-tab]').forEach(n=>n.onclick=()=>tab(n.dataset.tab));common.forEach(k=>$(k).addEventListener('input',markDirty));
+document.querySelectorAll('[data-tab]').forEach(n=>n.onclick=()=>{tab(n.dataset.tab);if(n.dataset.tab==='templates')action(refreshTemplates);});common.forEach(k=>$(k).addEventListener('input',markDirty));
 $('new').onclick=()=>{if(!state.dirty||confirm('Start a new inspection without saving current changes?'))reset();};
 $('save').onclick=()=>action(async()=>{await save();toast('Inspection saved to the temporary test server.');});
 $('refresh').onclick=()=>action(refreshList);
@@ -62,3 +62,37 @@ $('generate').onclick=()=>action(async()=>{if(!state.reports.length)throw new Er
 $('search').onclick=()=>action(async()=>{const result=await json($('draft-codes').checked?'/codes/draft/search':'/codes/search',{method:'POST',json:{query:$('code-query').value,on_date:$('inspection_date').value,semantic:$('semantic').checked,library:$('draft-library').value}});const root=$('code-results');root.replaceChildren(el('p',result.notice,'muted'));if(!result.results.length)root.append(el('p','No matching sections found in the selected library.'));for(const r of result.results){const card=el('div',undefined,'result-card');card.append(el('h3',`${r.agency} · ${r.section}`),el('p',r.title),el('p',r.text),el('p',r.verified===false?`DRAFT · PDF pages ${(r.source_pages||[]).join(', ')} · ${r.retrieval}`:`Effective ${r.effective_from} · ${r.retrieval}`,'muted'),r.url?sourceLink(r.url,'View authoritative source'):el('p',`Parent sections: ${(r.parent_sections||[]).join(', ')||'Chapter context'}`,'muted'));root.append(card);}});
 $('export-json').onclick=()=>{try{const data={version:1,inspection:payload(),evidence_metadata:state.media.map(({id,filename,note,equipment,kind})=>({id,filename,note,equipment,kind})),notice:'Photo/audio bytes are not included. Keep the original files separately.'};downloadURL(URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),`inspection-${$('project').value.replace(/[^a-zA-Z0-9_-]/g,'_')||'draft'}.json`);toast('Backup downloaded. Original media must be kept separately.');}catch(e){toast(e.message,true);}};
 window.addEventListener('beforeunload',event=>{if(state.token&&state.dirty){event.preventDefault();event.returnValue='';}});
+
+async function refreshTemplates(){
+  const data=await json('/templates');$('templates-storage').textContent=data.notice;
+  $('template-fields').textContent='Available fields: '+data.fields.map(k=>'{{'+k+'}}').join(', ');
+  const root=$('template-versions');root.replaceChildren();
+  for(const slot of data.slots){
+    const section=el('section',undefined,'panel');section.append(el('h2',`${slot.startsWith('SF')?'Scaffold':'Shed'} · ${slot.endsWith('-No OIs')?'No open items':'Open items'}`));
+    for(const record of data.versions.filter(r=>r.slot===slot)){
+      const card=el('article',undefined,'result-card');card.dataset.templateVersion=record.id;
+      const active=data.active[slot]===record.id;
+      card.append(el('h3',record.label+(active?' · ACTIVE':'')),el('p',`${record.mode==='legacy'?'Existing DSENY tables':'Placeholder layout'} · ${new Date(record.created_at).toLocaleString()}`,'muted'),el('p',`Version ${record.id}`,'muted'));
+      for(const error of record.errors)card.append(el('p',error,'muted'));
+      const actions=el('div',undefined,'downloads');
+      const download=el('button','Download template DOCX','secondary');download.onclick=()=>action(async()=>{const response=await api(`/templates/${record.id}/download`);downloadURL(URL.createObjectURL(await response.blob()),`${record.slot}-${record.id}.docx`);});actions.append(download);
+      const backup=el('button','Download version settings','secondary');backup.onclick=()=>action(async()=>{const metadata=await json(`/templates/${record.id}/metadata`);downloadURL(URL.createObjectURL(new Blob([JSON.stringify(metadata,null,2)],{type:'application/json'})),`${record.slot}-${record.id}.json`);});actions.append(backup);
+      const preview=el('button','Generate sample','secondary');preview.onclick=()=>action(async()=>{const result=await json(`/templates/${record.id}/preview`,{method:'POST'});const panel=$('template-preview');panel.hidden=false;panel.replaceChildren(el('h2','Sample report — review before activation'),el('p',result.notice));for(const report of result.reports){for(const note of report.review_required||[])panel.append(el('p',note,'muted'));if(report.error)panel.append(el('p',report.error));if(report.font_audit?.missing?.length)panel.append(el('p','Check font substitutions: '+report.font_audit.missing.join(', ')));}for(const artifact of result.artifacts){const button=el('button',`Download sample ${artifact.filename.endsWith('.pdf')?'PDF':artifact.filename.endsWith('.docx')?'DOCX':artifact.filename.endsWith('.eml')?'email':'HTML'}`,'secondary');button.onclick=()=>action(()=>downloadArtifact(artifact));panel.append(button);}panel.append(el('p',result.preview_success?'Sample generated. Open the files, review layout, then confirm and activate the version below.':'Conversion did not complete. Fix the reported issue before activation.'));await refreshTemplates();panel.scrollIntoView({behavior:'smooth',block:'start'});});actions.append(preview);card.append(actions);
+      if(record.mode==='placeholders'&&record.fields.length){
+        const details=el('details');details.append(el('summary','Field mapping · save changes as a new version'));
+        const selectors=[];
+        for(const name of record.fields){const label=el('label',`{{${name}}} receives`);const select=el('select');select.setAttribute('aria-label',`{{${name}}} receives`);select.append(new Option('Choose an inspection field',''));for(const field of data.fields)select.append(new Option(field,field));select.value=record.mapping[name]||(data.fields.includes(name)?name:'');label.append(select);details.append(label);selectors.push([name,select]);}
+        const save=el('button','Save mapping as new version','secondary');save.onclick=()=>action(async()=>{const mapping={};for(const [name,select] of selectors){if(!select.value)throw new Error('Choose a field for '+name);mapping[name]=select.value;}await json(`/templates/${record.id}/mapping`,{method:'POST',json:{mapping}});await refreshTemplates();toast('Mapping saved as a draft version. Generate a fresh sample before activation.');});details.append(save);card.append(details);
+      }
+      if(!active){const label=el('label',undefined,'check');const reviewed=el('input');reviewed.type='checkbox';label.append(reviewed,document.createTextNode('I reviewed the sample layout, wording and field placement.'));card.append(label);const activate=el('button',record.builtin?'Restore original version':'Activate this version');activate.onclick=()=>action(async()=>{if(!reviewed.checked)throw new Error('Review the sample and confirm the checkbox first.');await json(`/templates/${record.id}/activate`,{method:'POST',json:{reviewed:true}});await refreshTemplates();toast('Template activated. New reports will use this version.');});card.append(activate);}
+      section.append(card);
+    }root.append(section);
+  }
+}
+$('templates-refresh').onclick=()=>action(refreshTemplates);
+$('template-upload').onclick=()=>action(async()=>{
+  const file=$('template-file').files[0];if(!file)throw new Error('Choose a DOCX template.');if(file.size>10*1024*1024)throw new Error('DOCX upload limit is 10 MB.');
+  const query=new URLSearchParams({slot:$('template-slot').value,mode:$('template-mode').value,label:$('template-label').value.trim()||file.name,filename:file.name});
+  await json('/templates?'+query,{method:'POST',body:file,mime:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  $('template-file').value='';await refreshTemplates();toast('Draft template uploaded. Review mapping and generate a sample before activation.');
+});

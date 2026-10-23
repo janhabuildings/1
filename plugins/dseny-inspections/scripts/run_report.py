@@ -144,7 +144,7 @@ def check_address(address):
     return address
 
 
-def generate(request, output, renderer='libreoffice'):
+def generate(request, output, renderer='libreoffice', templates=None):
     if renderer not in ('libreoffice','word'):
         raise ValueError('renderer must be libreoffice or word')
     entries=request.get('reports')
@@ -174,13 +174,17 @@ def generate(request, output, renderer='libreoffice'):
         if len(safe)>170: raise ValueError('Report subject is too long for artifact filenames')
         folder=output/data['equipment'];folder.mkdir()
         docx=folder/(safe+' - DRAFT.docx')
-        reports.fill_report(data,docx,draft=True)
+        selected=(templates or {}).get(data['equipment']+'-'+data['status'])
+        options={} if selected is None else {'template':selected['path'],'template_mode':selected['mode'],'mapping':selected.get('mapping',{})}
+        reports.fill_report(data,docx,draft=True,**options)
         audit=font_audit(docx)
         entry={'equipment':data['equipment'],'subject':title,'docx':str(docx),'missing_fields':missing,
                'font_audit':audit,'renderer':renderer,'delivery_ready':False,'status':'docx_generated',
                'review_required':['Inspect actual document page breaks and email table layout',
                                   'Confirm inspection facts and pending fields'],
                'source_references':data.get('source_references',[]),'photo_references':data.get('photo_references',[])}
+        if selected:
+            entry['template_version']={key:selected[key] for key in ('id','sha256')}
         if data['status']=='No OIs':
             entry['review_required'].append('PE must sign/seal the final PDF; conversion is not a signature')
         try:

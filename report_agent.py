@@ -104,10 +104,80 @@ def set_rows(table, start, entries):
             replace_cell(cell, value)
 
 
-def fill_report(data, output, *, draft=False):
+# Supported stable placeholders; unknown fields are never silently dropped.
+TEMPLATE_FIELDS = tuple(('client project subject_project requested_by permit address locations inspection_code '
+    'request_date inspection_date drawings_on_site drawings_approved product status attendees open_items '
+    'source_references photo_references').split()) + tuple('site.'+k for k in (
+    'length_ft','height_ft','sections','width_ft','tie_horizontal','tie_vertical',
+    'planked_levels','outrigger_levels','tie_type','dunnage_type'))
+TOKEN = re.compile(r'\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}')
+
+
+def template_values(data):
+    result={key:str(data.get(key,'')) for key in TEMPLATE_FIELDS if not key.startswith('site.')}
+    for key in ('request_date','inspection_date'):
+        result[key]=date.fromisoformat(data[key]).strftime('%m.%d.%Y')
+    result['product']=product(data)
+    result['attendees']='\n'.join(' | '.join(a[k] for k in ('name','company','title')) for a in data['attendees'])
+    result['open_items']='\n'.join(f'{i}. {x["location"]}: {x["action"]}' for i,x in enumerate(data['open_items'],1)) or 'No open items.'
+    for key in ('source_references','photo_references'): result[key]='\n'.join(data.get(key,[]))
+    for key in TEMPLATE_FIELDS:
+        if key.startswith('site.'): result[key]=str(data.get('site',{}).get(key[5:],'[Pending confirmation]'))
+    return result
+
+
+def fill_placeholders(data, output, source, mapping):
+    values=template_values(data)
+    parser=etree.XMLParser(resolve_entities=False,load_dtd=False,no_network=True)
+    with ZipFile(source) as original, ZipFile(output,'w') as result:
+        for item in original.infolist():
+            content=original.read(item.filename)
+            if item.filename.startswith('word/') and item.filename.endswith('.xml'):
+                root=etree.fromstring(content,parser)
+                changed=False
+                for paragraph in root.iter(W+'p'):
+                    # Tokens may be split across Word runs. Replace from the right so offsets remain stable.
+                    nodes=list(paragraph.iter(W+'t'))
+                    text=''.join(n.text or '' for n in nodes)
+                    offsets=[];position=0
+                    for node in nodes:
+                        offsets.append((position,position+len(node.text or ''),node));position=offsets[-1][1]
+                    matches=list(TOKEN.finditer(text))
+                    if matches: changed=True
+                    for match in reversed(matches):
+                        key=mapping.get(match[1],match[1])
+                        if key not in values: raise ValueError('Unmapped template field: '+match[1])
+                        first=next(i for i,(a,b,_) in enumerate(offsets) if a<=match.start()<b)
+                        last=next(i for i,(a,b,_) in enumerate(offsets) if a<match.end()<=b)
+                        a,_,node=offsets[first];prefix=(node.text or '')[:match.start()-a]
+                        end_a,_,end_node=offsets[last];suffix=(end_node.text or '')[match.end()-end_a:]
+                        node.text=prefix+values[key]+(suffix if first==last else '')
+                        node.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
+                        # Convert inserted line breaks to Word line-break nodes without changing run properties.
+                        if '\n' in (node.text or ''):
+                            pieces=node.text.split('\n');node.text=pieces[0]
+                            parent=node.getparent();index=parent.index(node)+1
+                            for piece in pieces[1:]:
+                                parent.insert(index,etree.Element(W+'br'));index+=1
+                                next_node=etree.Element(W+'t');next_node.text=piece
+                                next_node.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
+                                parent.insert(index,next_node);index+=1
+                        if first!=last:
+                            for _,_,middle in offsets[first+1:last]: middle.text=''
+                            end_node.text=suffix
+                if changed: content=etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
+            result.writestr(item,content)
+    return source
+
+
+def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None):
     validate(data, draft=draft)
     variant = 'Ois' if data['status'] == 'OIs' else 'N-Ois'
     source = ROOT / 'templates' / f'New Template {data["equipment"]}-{variant}.docx'
+    if template is not None: source=Path(template)
+    if template_mode == "placeholders":
+        return fill_placeholders(data,output,source,mapping or {})
+    if template_mode != "legacy": raise ValueError("Unsupported template mode")
     doc = Document(source)
     table = doc.tables[1]
     values = {(1,1): data['client'], (1,4): data['project'],

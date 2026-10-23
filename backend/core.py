@@ -85,7 +85,7 @@ class Store:
                     for r in db.execute('SELECT * FROM media WHERE inspection_id=? ORDER BY rowid',(inspection,))]
 
     def file(self, identity, table):
-        if table not in ('media','artifacts'): raise ValueError('Invalid table')
+        if table not in ('media','artifacts','template_artifacts'): raise ValueError('Invalid table')
         with self.connect() as db:
             row=db.execute(f'SELECT * FROM {table} WHERE id=?',(identity,)).fetchone()
         if not row: raise KeyError('File not found')

@@ -115,3 +115,7 @@ Browser checks use Playwright and Chromium. `backend/requirements-dev.txt` inclu
 This requires the existing Render `AI_API_KEY` and matching `text-embedding-3-small` query model. No new embedding of the full manuals is needed. Queries are derived from the initial observations, so an unlabeled photograph can retrieve relevant clauses. The model still cannot establish hidden connections, dimensions, measurements, applicable code edition, or No OIs. Results remain suggestions and are never written to inspection/report facts by this endpoint. The operator must confirm or edit an open item. Draft sources are not promoted into the date-verified library.
 
 Tests use controlled AI responses and real stored vectors to exercise retrieval, photo ownership/identity, exact quote checks and report non-mutation. They do not measure the real model's accuracy on field photos. Validate on representative inspection photographs before relying on suggestions.
+
+### Report template management
+
+The authenticated web workspace now includes **Templates**: versioned DOCX uploads, stable placeholder/alias mapping, real sample exports, reviewed activation and rollback for all four SF/SH outcomes. Existing iPhone builds use activated versions on their next report generation without reinstalling. See [Template management](TEMPLATE_MANAGEMENT.md) for the field contract, endpoints, backup/restore instructions and current Render Free storage limits.

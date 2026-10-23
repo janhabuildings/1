@@ -109,6 +109,14 @@ class UploadInfo(BaseModel):
     equipment: Literal['','SF','SH'] = ''
 
 
+class TemplateMappingInput(BaseModel):
+    mapping: dict[str,str] = Field(default_factory=dict,max_length=100)
+
+
+class TemplateActivationInput(BaseModel):
+    reviewed: bool = False
+
+
 class ExportInput(BaseModel):
     recipients_confirmed: bool = False
     to: list[str] = Field(default_factory=list)
@@ -118,6 +126,8 @@ class ExportInput(BaseModel):
 def create_app(settings=None):
     settings=settings or Settings.from_env()
     store=Store(settings.data_dir)
+    from backend.templates import TemplateManager, sample_report
+    templates=TemplateManager(store)
     app=FastAPI(title='JBI Inspections',version='0.1.0',docs_url=None,redoc_url=None)
     app.state.store=store
     app.state.settings=settings
@@ -339,10 +349,7 @@ def create_app(settings=None):
             suggestions['missing_information']=list(dict.fromkeys(suggestions['missing_information']+visual['missing_information']))
         return {'suggestions':suggestions,'retrieved_references':references,'applied_to_report':False,'requires_inspector_review':True}
 
-    @app.post('/inspections/{identity}/reports',dependencies=[Depends(authorized)])
-    async def generate_reports(identity:str,data:ExportInput):
-        inspection=store.get(identity)
-        if not inspection.get('reports'): raise HTTPException(422,'Add at least one report with an explicit OIs/No OIs result')
+    async def render_reports(entries,data,selected,identity=None):
         runner_path=ROOT/'plugins/dseny-inspections/scripts/run_report.py'
         runtime=runner_path.parents[1]/'runtime/report_agent.py'
         if not runtime.is_file(): raise HTTPException(503,'Build the report runtime with scripts/build_plugin.py')
@@ -350,15 +357,15 @@ def create_app(settings=None):
         runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
         output=store.root/'reports'/uid()
         request={'mailbox':{'account':'janhabuildings@gmail.com','to':data.to,'cc':data.cc,
-                            'recipients_confirmed':data.recipients_confirmed},'reports':inspection['reports']}
+                            'recipients_confirmed':data.recipients_confirmed},'reports':entries}
         def work():
             # The explicit Office path is process configuration, not request-controlled input.
             if settings.office_bin:
                 import os
                 os.environ['DSENY_OFFICE_BIN']=settings.office_bin
-            return runner.generate(request,output)
+            return runner.generate(request,output,templates=selected)
         try: manifest=await asyncio.to_thread(work)
-        except (ValueError,KeyError,TypeError) as error: raise HTTPException(422,str(error))
+        except (ValueError,KeyError,TypeError,IndexError) as error: raise HTTPException(422,str(error))
         artifacts=[]
         types={'.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                '.pdf':'application/pdf','.html':'text/html','.eml':'message/rfc822'}
@@ -366,18 +373,85 @@ def create_app(settings=None):
             if path.suffix not in types or not path.is_file(): continue
             artifact=uid()
             with store.connect() as db:
-                db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?)',(artifact,identity,path.name,types[path.suffix],str(path)))
+                if identity is None:
+                    db.execute('INSERT INTO template_artifacts VALUES (?,?,?,?,?)',
+                        (artifact,next(iter(selected.values()))['id'],path.name,types[path.suffix],str(path)))
+                else:
+                    db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?)',(artifact,identity,path.name,types[path.suffix],str(path)))
             artifacts.append({'id':artifact,'filename':path.name,'mime':types[path.suffix],'equipment':path.parent.name})
         # Server filesystem locations are not public download URLs.
         summaries=[{key:value for key,value in report.items() if key in
-                    ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error')}
+                    ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error','template_version')}
                    for report in manifest['reports']]
         return {'reports':summaries,'artifacts':artifacts,'mailbox_drafts_created':False,
                 'notice':'Review rendering and missing facts; no professional signature or seal has been applied.'}
 
+    @app.post('/inspections/{identity}/reports',dependencies=[Depends(authorized)])
+    async def generate_reports(identity:str,data:ExportInput):
+        inspection=store.get(identity)
+        if not inspection.get('reports'): raise HTTPException(422,'Add at least one report with an explicit OIs/No OIs result')
+        try: selected=templates.active()
+        except ValueError as error: raise HTTPException(409,str(error))
+        return await render_reports(inspection['reports'],data,selected,identity)
+
+    @app.get('/templates',dependencies=[Depends(authorized)])
+    def template_list():
+        try: return templates.list()
+        except ValueError as error: raise HTTPException(409,str(error))
+
+    @app.post('/templates',status_code=201,dependencies=[Depends(authorized)])
+    async def template_upload(request:Request,slot:str,mode:Literal['legacy','placeholders']='placeholders',
+                              label:str='Uploaded revision',filename:str='template.docx'):
+        if Path(filename).suffix.lower()!='.docx': raise HTTPException(422,'Choose a .docx file')
+        if not label.strip() or len(label)>120: raise HTTPException(422,'Provide a version label up to 120 characters')
+        content=bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content)>10*1024*1024: raise HTTPException(413,'DOCX upload limit is 10 MB')
+        try: return templates.add(bytes(content),slot,label.strip(),mode,{})
+        except ValueError as error: raise HTTPException(422,str(error))
+
+    @app.get('/templates/{identity}/download',dependencies=[Depends(authorized)])
+    def template_download(identity:str):
+        try: record=templates.get(identity)
+        except ValueError as error: raise HTTPException(409,str(error))
+        return FileResponse(record['path'],filename=record['slot']+'-'+record['id']+'.docx',
+                            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+
+    @app.get('/templates/{identity}/metadata',dependencies=[Depends(authorized)])
+    def template_metadata(identity:str):
+        try: return templates.public(templates.get(identity))
+        except ValueError as error: raise HTTPException(409,str(error))
+
+    @app.post('/templates/{identity}/mapping',status_code=201,dependencies=[Depends(authorized)])
+    def template_mapping(identity:str,data:TemplateMappingInput):
+        try:
+            record=templates.get(identity)
+            return templates.add(Path(record['path']).read_bytes(),record['slot'],record['label']+' (mapping)',record['mode'],data.mapping)
+        except ValueError as error: raise HTTPException(422,str(error))
+
+    @app.post('/templates/{identity}/preview',dependencies=[Depends(authorized)])
+    async def template_preview(identity:str):
+        try:
+            record=templates.get(identity);info=templates.public(record)
+            if not info['valid']: raise ValueError('; '.join(info['errors']))
+        except ValueError as error: raise HTTPException(422,str(error))
+        result=await render_reports([sample_report(record['slot'])],ExportInput(),{record['slot']:record})
+        success=bool(result['reports']) and all(r['status']=='local_draft_generated' for r in result['reports'])
+        if success:
+            with store.connect() as db: db.execute('UPDATE template_versions SET previewed=1 WHERE id=?',(identity,))
+        return dict(result,preview_success=success,template_version=identity,
+                    notice='SAMPLE ONLY — not an actual inspection. Review DOCX and rendered PDF/email formatting before activation.')
+
+    @app.post('/templates/{identity}/activate',dependencies=[Depends(authorized)])
+    def template_activate(identity:str,data:TemplateActivationInput):
+        try: return templates.activate(identity,data.reviewed)
+        except ValueError as error: raise HTTPException(422,str(error))
+
     @app.get('/artifacts/{identity}',dependencies=[Depends(authorized)])
     def artifact(identity:str):
-        record=store.file(identity,'artifacts')
+        try: record=store.file(identity,'artifacts')
+        except KeyError: record=store.file(identity,'template_artifacts')
         return FileResponse(record['path'],media_type=record['mime'],filename=record['filename'])
 
     return app

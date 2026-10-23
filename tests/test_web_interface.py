@@ -116,6 +116,32 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#code-results')).to_contain_text('2025')
         self.assertEqual(self.errors,[])
         self.assertEqual(self.page.evaluate('localStorage.length'),0)
+    def test_template_upload_mapping_preview_and_activation(self):
+        from playwright.sync_api import expect
+        from tests.test_templates import placeholder_doc
+        self.connect()
+        self.page.locator('[data-tab=templates]').click()
+        expect(self.page.locator('#template-versions')).to_contain_text('Original DSENY template')
+        self.page.locator('#template-mode').select_option('placeholders')
+        self.page.locator('#template-label').fill('Browser template')
+        source=Path(self.temp.name)/'browser-template.docx';source.write_bytes(placeholder_doc(alias=True))
+        self.page.locator('#template-file').set_input_files(str(source))
+        self.page.locator('#template-upload').click()
+        card=self.page.locator('[data-template-version]').filter(has=self.page.get_by_role('heading',name='Browser template',exact=True))
+        expect(card).to_contain_text('Map unsupported fields: school_name')
+        card.locator('summary').click()
+        card.get_by_label('{{school_name}} receives',exact=True).select_option('project')
+        card.get_by_role('button',name='Save mapping as new version',exact=True).click()
+        revised=self.page.locator('[data-template-version]').filter(has=self.page.get_by_role('heading',name='Browser template (mapping)',exact=True))
+        expect(revised).to_be_visible()
+        revised.get_by_role('button',name='Generate sample',exact=True).click()
+        expect(self.page.locator('#template-preview')).to_contain_text('Sample generated.',timeout=60000)
+        expect(self.page.locator('#template-preview').get_by_role('button',name='Download sample DOCX',exact=True)).to_be_visible()
+        revised.get_by_role('checkbox').check()
+        revised.get_by_role('button',name='Activate this version',exact=True).click()
+        expect(self.page.locator('#template-versions')).to_contain_text('Browser template (mapping) · ACTIVE')
+        self.assertEqual(self.errors,[])
+
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
         self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nInspected on:\n10/15/2026\nM00981443-I1 SF')
