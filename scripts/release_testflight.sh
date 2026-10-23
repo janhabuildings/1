@@ -86,8 +86,8 @@ xcodebuild -exportArchive -archivePath "$release_dir/JBI.xcarchive" -exportOptio
 ipa="$release_dir/export/JBIInspections.ipa"
 test -f "$ipa"
 stage="uploading the app to App Store Connect"
-if xcrun iTMSTransporter -m upload -assetFile "$ipa" -apiKey "$ASC_KEY_ID" -apiIssuer "$ASC_ISSUER_ID" > "$release_dir/upload.log" 2>&1; then
-  echo 'Apple Transporter accepted the upload.'
+if xcrun altool --upload-app --type ios --file "$ipa" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" > "$release_dir/upload.log" 2>&1; then
+  echo 'Apple uploader accepted the upload.'
 else
   python3 - <<'PYERROR'
 import os,pathlib,re
@@ -100,7 +100,7 @@ for line in lines[-12:]:
         if value: line=line.replace(value,'[redacted]')
     line=line[:2000].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
     print('::error::'+line)
-if not lines: print('::error::Apple Transporter failed; see the release job log for details.')
+if not lines: print('::error::Apple uploader failed; see the release job log for details.')
 PYERROR
   exit 1
 fi

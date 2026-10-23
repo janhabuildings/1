@@ -36,7 +36,7 @@ A signing certificate can be requested with a CSR created on Windows using OpenS
 
 The checked-in app icon is a provisional opaque JBI monogram. Info.plist uses build-setting version values so each release attempt gets a distinct build number. No assertion about encryption export exemptions is prefilled; answer Apple's compliance questions for the actual app.
 
-Open GitHub Actions → **Release iPhone app to TestFlight** → Run workflow → main. This is a manual upload action, not an automatic upload on every push. It imports signing material into a temporary keychain, checks the profile's team, bundle, expiry and distribution type, archives the device app, exports an IPA and uploads with Apple's Transporter. Signing files, private key, temporary keychain and IPA are deleted during cleanup; no credential-bearing release archive is uploaded as a GitHub artifact.
+Open GitHub Actions → **Release iPhone app to TestFlight** → Run workflow → main. This is a manual upload action, not an automatic upload on every push. It imports signing material into a temporary keychain, checks the profile's team, bundle, expiry and distribution type, archives the device app, exports an IPA and uploads with Apple's `altool` command-line uploader. Signing files, private key, temporary keychain and IPA are deleted during cleanup; no credential-bearing release archive is uploaded as a GitHub artifact.
 
 This signing/upload workflow cannot be fully verified until your credentials and app record are configured. Simulator compilation does not establish that signing or App Store validation will pass. Check the upload result and App Store Connect processing before assuming a TestFlight build is available.
 
