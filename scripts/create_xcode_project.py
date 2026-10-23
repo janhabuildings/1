@@ -16,13 +16,15 @@ for path in sources:
 obj('plist','isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";')
 obj('privacy','isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>";')
 obj('privacybuild',f'isa = PBXBuildFile; fileRef = {identity("privacy")};')
+obj('assets','isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>";')
+obj('assetsbuild',f'isa = PBXBuildFile; fileRef = {identity("assets")};')
 obj('product','isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = JBIInspections.app; sourceTree = BUILT_PRODUCTS_DIR;')
-obj('sourcegroup','isa = PBXGroup; children = ('+','.join(identity('file-'+p.name) for p in sources)+','+identity('plist')+','+identity('privacy')+'); path = JBIInspections; sourceTree = "<group>";')
+obj('sourcegroup','isa = PBXGroup; children = ('+','.join(identity('file-'+p.name) for p in sources)+','+identity('plist')+','+identity('privacy')+','+identity('assets')+'); path = JBIInspections; sourceTree = "<group>";')
 obj('products',f'isa = PBXGroup; children = ({identity("product")}); name = Products; sourceTree = "<group>";')
 obj('main',f'isa = PBXGroup; children = ({identity("sourcegroup")},{identity("products")}); sourceTree = "<group>";')
 obj('sources','isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ('+','.join(identity('build-'+p.name) for p in sources)+'); runOnlyForDeploymentPostprocessing = 0;')
 for phase,isa in [('frameworks','PBXFrameworksBuildPhase'),('resources','PBXResourcesBuildPhase')]:
-    files=identity('privacybuild') if phase=='resources' else ''
+    files=identity('privacybuild')+','+identity('assetsbuild') if phase=='resources' else ''
     obj(phase,f'isa = {isa}; buildActionMask = 2147483647; files = ({files}); runOnlyForDeploymentPostprocessing = 0;')
 for config in ['Debug','Release']:
     project_settings={'CLANG_ENABLE_MODULES':'YES','SWIFT_VERSION':'5.0','IPHONEOS_DEPLOYMENT_TARGET':'17.0',
@@ -32,7 +34,7 @@ for config in ['Debug','Release']:
                       'SWIFT_ACTIVE_COMPILATION_CONDITIONS':'DEBUG' if config=='Debug' else ''}
     target_settings={'PRODUCT_BUNDLE_IDENTIFIER':'nyc.dseny.JBIInspections','PRODUCT_NAME':'$(TARGET_NAME)',
                      'INFOPLIST_FILE':'JBIInspections/Info.plist','GENERATE_INFOPLIST_FILE':'NO',
-                     'CODE_SIGN_STYLE':'Automatic','TARGETED_DEVICE_FAMILY':'1',
+                     'ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon','CODE_SIGN_STYLE':'Automatic','TARGETED_DEVICE_FAMILY':'1',
                      'CURRENT_PROJECT_VERSION':'1','MARKETING_VERSION':'0.1.0','ENABLE_PREVIEWS':'YES',
                      'LD_RUNPATH_SEARCH_PATHS':'$(inherited) @executable_path/Frameworks'}
     for scope,values in [('project',project_settings),('target',target_settings)]:
