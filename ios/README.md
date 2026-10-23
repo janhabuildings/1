@@ -52,7 +52,7 @@ For installation without your own Mac, the planned distribution route is TestFli
 
 1. Enroll in the [Apple Developer Program](https://developer.apple.com/programs/enroll/) if needed (Apple generally charges US$99 per membership year; local pricing and eligibility vary).
 2. Register the app's bundle ID and create its App Store Connect record under your own account.
-3. Configure distribution signing and provisioning for a cloud device archive. Keep certificates, private keys and App Store Connect API credentials in secure CI secrets, never source code or chat. No release-signing workflow or credentials have been configured yet.
+3. Configure distribution signing and provisioning for a cloud device archive. Keep certificates, private keys and App Store Connect API credentials in secure CI secrets, never source code or chat. The manual release-signing workflow is prepared; credentials still need configuring. Follow [TestFlight setup](TESTFLIGHT.md).
 4. Complete release assets, including the app icon and required privacy/export-compliance details, and validate an iPhone archive before uploading it to App Store Connect.
 5. Install Apple's TestFlight app on the iPhone and accept the invitation after the build is processed. External testing may require Beta App Review; internal testing depends on App Store Connect access. TestFlight builds expire after 90 days.
 
