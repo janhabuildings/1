@@ -1,6 +1,6 @@
 # TestFlight setup without owning a Mac
 
-The app compiles on GitHub's macOS runners using the explicitly selected Xcode 26.3 toolchain, satisfying Apple's iOS 26 SDK upload requirement. The manual **Release iPhone app to TestFlight** workflow signs, archives and uploads it after the following account configuration. Enrollment alone does not supply signing credentials. No Apple credentials are in this repository and no TestFlight upload has been made.
+The app compiles on GitHub's macOS runners using the explicitly selected Xcode 26.3 toolchain, satisfying Apple's iOS 26 SDK upload requirement. The manual **Release iPhone app to TestFlight** workflow signs, archives and uploads it after the following account configuration. Enrollment alone does not supply signing credentials. No Apple credentials are in this repository. The first signed upload succeeded as version **0.1.0 (7.1)** in [release run 39894869625](https://github.com/janhabuildings/1/actions/runs/39894869625). Apple processing and installation on a physical device have not been verified.
 
 ## 1. Create the Apple app identity
 
@@ -38,7 +38,7 @@ The checked-in app icon is a provisional opaque JBI monogram. Info.plist uses bu
 
 Open GitHub Actions → **Release iPhone app to TestFlight** → Run workflow → main. This is a manual upload action, not an automatic upload on every push. It imports signing material into a temporary keychain, checks the profile's team, bundle, expiry and distribution type, archives the device app, exports an IPA and uploads with Apple's `altool` command-line uploader. Signing files, private key, temporary keychain and IPA are deleted during cleanup; no credential-bearing release archive is uploaded as a GitHub artifact.
 
-This signing/upload workflow cannot be fully verified until your credentials and app record are configured. Simulator compilation does not establish that signing or App Store validation will pass. Check the upload result and App Store Connect processing before assuming a TestFlight build is available.
+The signed archive, IPA export and upload completed successfully using the configured credentials. That does not establish that Apple processing has finished or that the app has been tested on a physical iPhone. Check App Store Connect for processing status, export-compliance questions and internal tester assignment before expecting a TestFlight installation.
 
 ## 4. Install and test
 
