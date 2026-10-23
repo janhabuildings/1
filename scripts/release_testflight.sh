@@ -86,5 +86,22 @@ xcodebuild -exportArchive -archivePath "$release_dir/JBI.xcarchive" -exportOptio
 ipa="$release_dir/export/JBIInspections.ipa"
 test -f "$ipa"
 stage="uploading the app to App Store Connect"
-xcrun iTMSTransporter -m upload -assetFile "$ipa" -apiKey "$ASC_KEY_ID" -apiIssuer "$ASC_ISSUER_ID"
+if xcrun iTMSTransporter -m upload -assetFile "$ipa" -apiKey "$ASC_KEY_ID" -apiIssuer "$ASC_ISSUER_ID" > "$release_dir/upload.log" 2>&1; then
+  echo 'Apple Transporter accepted the upload.'
+else
+  python3 - <<'PYERROR'
+import os,pathlib,re
+log=(pathlib.Path(os.environ['RELEASE_DIR'])/'upload.log').read_text(errors='replace')
+lines=[line for line in log.splitlines() if re.search(r'error|failed|exception|invalid|unable|not found|refused',line,re.I)]
+for line in lines[-12:]:
+    # Redact configured credentials before publishing diagnostic annotations.
+    for name in ('ASC_PRIVATE_KEY','ASC_KEY_ID','ASC_ISSUER_ID','APPLE_CERTIFICATE_PASSWORD'):
+        value=os.environ.get(name,'')
+        if value: line=line.replace(value,'[redacted]')
+    line=line[:2000].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+    print('::error::'+line)
+if not lines: print('::error::Apple Transporter failed; see the release job log for details.')
+PYERROR
+  exit 1
+fi
 echo 'Upload finished. Check App Store Connect for processing, compliance questions and tester availability.'
