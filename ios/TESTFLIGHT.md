@@ -20,7 +20,7 @@ In [GitHub Actions settings](https://github.com/janhabuildings/1/settings/secret
 
 | Setting | Type | Value |
 | --- | --- | --- |
-| `APPLE_TEAM_ID` | Repository variable | Your 10-character Apple Team ID from developer membership details |
+| `APPLE_TEAM_ID` | Repository variable | Optional override; workflow defaults to confirmed Team ID `JZJQN8NU2S` |
 | `APPLE_CERTIFICATE_BASE64` | Repository secret | Base64 of an Apple Distribution certificate exported as a password-protected `.p12`, **including its private key** |
 | `APPLE_CERTIFICATE_PASSWORD` | Repository secret | The password for that P12 |
 | `APPLE_PROFILE_BASE64` | Repository secret | Base64 of an App Store Connect distribution `.mobileprovision` for this bundle ID/team/certificate |

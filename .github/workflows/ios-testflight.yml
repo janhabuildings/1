@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     env:
-      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID || 'JZJQN8NU2S' }}
       APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_PROFILE_BASE64: ${{ secrets.APPLE_PROFILE_BASE64 }}
