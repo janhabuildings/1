@@ -204,6 +204,7 @@ struct InspectionDetail: View {
             guard !items.isEmpty else { return }
             Task {
                 for item in items {
+                    guard store.cache.inspections.contains(where: { $0.id == inspection.id }) else { break }
                     do {
                         if let data = try await item.loadTransferable(type: Data.self), let image = UIImage(data: data) { savePhoto(image) }
                     } catch { store.error = error.localizedDescription }
@@ -237,7 +238,7 @@ struct InspectionDetail: View {
         }
         .confirmationDialog("Delete this generated file?", isPresented: Binding(get: { removeArtifactID != nil }, set: { if !$0 { removeArtifactID = nil } }), titleVisibility: .visible) {
             Button("Delete file", role: .destructive) {
-                if let id = removeArtifactID { Task { do { _ = try await store.api.request("/artifacts/\(id)", method: "DELETE"); export?.artifacts.removeAll { $0.id == id } } catch { store.error = error.localizedDescription } } }
+                if let id = removeArtifactID { Task { do { _ = try await store.api.request("/artifacts/\(id)", method: "DELETE"); export?.artifacts.removeAll { $0.id == id }; try? FileManager.default.removeItem(at: store.directory.appendingPathComponent("exports").appendingPathComponent(id)); store.cache.artifactOwners?.removeValue(forKey: id); store.persist() } catch { store.error = error.localizedDescription } } }
                 removeArtifactID = nil
             }
         }

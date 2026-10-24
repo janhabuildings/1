@@ -29,6 +29,7 @@ import Foundation
         cache.dirty.insert(inspection.id); persist()
     }
     func addMedia(_ data: Data, to inspection: Inspection, kind: String, mime: String, ext: String) throws {
+        guard cache.inspections.contains(where: { $0.id == inspection.id }) else { throw APIError(message: "This inspection was deleted; evidence import stopped.") }
         var item = LocalMedia(inspectionID: inspection.id, kind: kind, relativePath: "", mime: mime)
         item.relativePath = item.id + "." + ext
         try data.write(to: directory.appendingPathComponent(item.relativePath), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])

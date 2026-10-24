@@ -12,7 +12,7 @@ struct StampSettings: View {
             TextField("Engineer name (must match PE attendee)", text: $owner)
             if let preview { Image(uiImage: preview).resizable().scaledToFit().frame(maxHeight: 150) }
             PhotosPicker(selection: $selection, matching: .images) { Label("Choose signature/stamp image", systemImage: "signature") }
-            Button("Remove saved signature/stamp", role: .destructive) {
+            Button("Remove signature/stamp from this phone", role: .destructive) {
                 try? FileManager.default.removeItem(at: store.directory.appendingPathComponent("saved-signature.png"))
                 preview = nil; message = "Removed from this phone."
             }.disabled(preview == nil)
