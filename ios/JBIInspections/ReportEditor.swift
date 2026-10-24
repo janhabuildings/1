@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ReportEditor: View {
     @Binding var report: ReportDraft
+    @State private var customSiteFields: Set<String> = []
     private var siteFields: [(String, String)] {
         report.equipment == "OT" ? [] : report.equipment == "SH" ? [("length_ft", "Approx. length (ft)"), ("sections", "Individual sections"),
             ("height_ft", "Max height (ft)"), ("width_ft", "Max width (ft)")] :
@@ -65,7 +66,13 @@ struct ReportEditor: View {
             }
             if report.equipment != "OT" { Section("Equipment dimensions and details") {
                 ForEach(siteFields, id: \.0) { key, label in
-                    TextField(label, text: Binding(get: { report.site[key] ?? "" }, set: { report.site[key] = $0 }))
+                    if key == "tie_type" {
+                        siteChoice(label, key: key, options: ["Masonry Anchor", "Concrete Wall Anchor", "Concrete Slab Anchor", "Steel Beam Anchor", "NA"])
+                    } else if key == "dunnage_type" {
+                        siteChoice(label, key: key, options: ["Grade", "Roof", "Shed", "NA"])
+                    } else {
+                        TextField(label, text: siteBinding(key))
+                    }
                 }
                 Text("Use NA only when you confirm it is not applicable. Unanswered values stay pending.").font(.caption)
             }
@@ -82,6 +89,25 @@ struct ReportEditor: View {
                 Text("Swipe to remove a finding. No OIs is never inferred from an empty list.").font(.caption)
             }
         }.navigationTitle(report.displayName + " facts")
+    }
+    @ViewBuilder
+    private func siteChoice(_ label: String, key: String, options: [String]) -> some View {
+        let value = report.site[key] ?? ""
+        let custom = customSiteFields.contains(key) || (!value.isEmpty && !options.contains(value))
+        Picker(label, selection: Binding(get: { custom ? "__custom__" : value }, set: { selected in
+            if selected == "__custom__" {
+                customSiteFields.insert(key)
+                if options.contains(report.site[key] ?? "") { report.site[key] = "" }
+            } else {
+                customSiteFields.remove(key)
+                report.site[key] = selected
+            }
+        })) {
+            Text("Not confirmed").tag("")
+            ForEach(options, id: \.self) { option in Text(option).tag(option) }
+            Text("Other / custom").tag("__custom__")
+        }.pickerStyle(.menu)
+        if custom { TextField(label + " · custom description", text: siteBinding(key)) }
     }
     private func siteBinding(_ key: String, defaultValue: String = "") -> Binding<String> {
         Binding(get: { report.site[key] ?? defaultValue }, set: { report.site[key] = $0 })

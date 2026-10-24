@@ -185,6 +185,28 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#template-versions')).to_contain_text('Browser template (mapping) · ACTIVE')
         self.assertEqual(self.errors,[])
 
+    def test_template_choice_dropdowns_preserve_custom_and_selected_values(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('#add-SF').click()
+        tie=self.page.get_by_label('Tie type',exact=True)
+        dunnage=self.page.get_by_label('Dunnage type',exact=True)
+        self.assertEqual(tie.input_value(), '')
+        self.assertEqual(dunnage.input_value(), '')
+        tie.select_option('Concrete Wall Anchor')
+        dunnage.select_option('__custom__')
+        self.page.get_by_label('Dunnage type · custom description',exact=True).fill('Timber pads on sleepers')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        record=self.app.state.store.list()[0]
+        saved=self.app.state.store.get(record['id'])
+        self.assertEqual(saved['reports'][0]['site']['tie_type'], 'Concrete Wall Anchor')
+        self.assertEqual(saved['reports'][0]['site']['dunnage_type'], 'Timber pads on sleepers')
+        self.page.locator('#add-SH').click()  # Re-render must preserve custom values.
+        self.assertEqual(self.page.get_by_label('Dunnage type · custom description',exact=True).input_value(), 'Timber pads on sleepers')
+        self.assertEqual(self.errors, [])
+
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
         self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nRequested by:\tExample Contact\nExample Company\nAddress:\t123 Example Street\nPermit#:\tM00981443-I1 SF\nPE Drawings on site?\tYes | NA | No\nInspected on:\n10/15/2026\nM00981443-I1 SF')
