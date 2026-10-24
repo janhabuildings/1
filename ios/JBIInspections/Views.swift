@@ -478,27 +478,33 @@ struct InspectionDetail: View {
             } catch { store.error = error.localizedDescription }
         }
     }
+    private func calendarFieldMissing(_ value: String) -> Bool {
+        ["", "[pending confirmation]", "pending", "tbd"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
     private func applyCalendar() {
         guard let candidates = calendarCandidates else { return }
-        if let value = candidates.fields["project"] { inspection.project = value }
-        if let value = candidates.fields["inspection_date"] { inspection.inspection_date = value }
+        if let value = candidates.fields["project"], calendarFieldMissing(inspection.project) { inspection.project = value }
+        if let value = candidates.fields["inspection_date"], calendarFieldMissing(inspection.inspection_date) { inspection.inspection_date = value }
         for item in candidates.equipment {
             if let equipment = item["equipment"], !inspection.reports.contains(where: { $0.equipment == equipment }) { addReport(equipment) }
         }
         for index in inspection.reports.indices {
-            if inspection.reports[index].client.isEmpty { inspection.reports[index].client = candidates.fields["client"] ?? "" }
-            if inspection.reports[index].project.isEmpty { inspection.reports[index].project = candidates.fields["project"] ?? "" }
-            if inspection.reports[index].requested_by.isEmpty { inspection.reports[index].requested_by = candidates.fields["requested_by"] ?? "" }
-            if inspection.reports[index].address.isEmpty { inspection.reports[index].address = candidates.fields["address"] ?? "" }
-            if inspection.reports[index].request_date.isEmpty { inspection.reports[index].request_date = candidates.fields["request_date"] ?? "" }
-            if let date = candidates.fields["inspection_date"] { inspection.reports[index].inspection_date = date }
+            if calendarFieldMissing(inspection.reports[index].client) { inspection.reports[index].client = candidates.fields["client"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].project) { inspection.reports[index].project = candidates.fields["project"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].requested_by) { inspection.reports[index].requested_by = candidates.fields["requested_by"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].address) { inspection.reports[index].address = candidates.fields["address"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].request_date) { inspection.reports[index].request_date = candidates.fields["request_date"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].inspection_date) { inspection.reports[index].inspection_date = inspection.inspection_date }
+            if calendarFieldMissing(inspection.reports[index].drawings_on_site) { inspection.reports[index].drawings_on_site = candidates.fields["drawings_on_site"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].drawings_approved) { inspection.reports[index].drawings_approved = candidates.fields["drawings_approved"] ?? "" }
+            if inspection.reports.count == 1 && calendarFieldMissing(inspection.reports[index].permit) { inspection.reports[index].permit = candidates.fields["permit"] ?? "" }
             if let item = candidates.equipment.first(where: { $0["equipment"] == inspection.reports[index].equipment }) {
-                if inspection.reports[index].permit.isEmpty { inspection.reports[index].permit = item["permit"] ?? "" }
-                if inspection.reports[index].inspection_code.isEmpty { inspection.reports[index].inspection_code = item["inspection_code"] ?? "" }
-                if inspection.reports[index].subject_project.isEmpty { inspection.reports[index].subject_project = item["subject_project"] ?? "" }
+                if calendarFieldMissing(inspection.reports[index].permit) { inspection.reports[index].permit = item["permit"] ?? "" }
+                if calendarFieldMissing(inspection.reports[index].inspection_code) { inspection.reports[index].inspection_code = item["inspection_code"] ?? "" }
+                if calendarFieldMissing(inspection.reports[index].subject_project) { inspection.reports[index].subject_project = item["subject_project"] ?? "" }
             }
         }
-        calendarCandidates = nil; status = "Calendar candidates added as draft facts. Review each report and confirm the result and drawing status."
+        calendarCandidates = nil; status = "Calendar candidates added to missing fields. Existing facts and inspection date kept. Review dates, result and drawing status."
     }
     private func analyze() {
         suggestedFindings = []; analysisChecks = []

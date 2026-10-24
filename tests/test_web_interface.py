@@ -187,7 +187,7 @@ class WebWorkflow(unittest.TestCase):
 
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
-        self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nInspected on:\n10/15/2026\nM00981443-I1 SF')
+        self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nRequested by:\tExample Contact\nExample Company\nAddress:\t123 Example Street\nPermit#:\tM00981443-I1 SF\nPE Drawings on site?\tYes | NA | No\nInspected on:\n10/15/2026\nM00981443-I1 SF')
         self.page.locator('#extract').click()
         self.page.locator('#calendar-candidates').wait_for(state='visible')
         from playwright.sync_api import expect
@@ -195,6 +195,8 @@ class WebWorkflow(unittest.TestCase):
         self.page.once('dialog',lambda dialog:dialog.accept())
         self.page.locator('#apply-calendar').click()
         self.assertEqual(self.page.locator('#client').input_value(),'Calendar Fixture')
+        self.assertEqual(self.page.locator('#requested_by').input_value(),'Example Contact Example Company')
+        self.assertEqual(self.page.locator('#address').input_value(),'123 Example Street')
         self.page.locator('[data-tab=reports]').click()
         self.assertEqual(self.page.locator('.report-card').get_by_label('Inspection result',exact=True).input_value(),'')
         self.assertEqual(self.errors,[])

@@ -100,22 +100,67 @@ def uid(): return str(uuid.uuid4())
 
 def calendar_candidates(text):
     """Extract labeled source values as unconfirmed suggestions, never as findings."""
-    lines=[s.strip() for s in text.splitlines() if s.strip()]
-    labels={'Client:':'client','Project:':'project','Request date:':'request_date','Inspected on:':'inspection_date',
-            'Request by:':'requested_by','Address:':'address'}
-    result={}
-    for i,line in enumerate(lines):
-        if line in labels and i+1<len(lines) and lines[i+1] not in labels:
-            value=lines[i+1]
-            if labels[line].endswith('_date'):
-                found=re.fullmatch(r'(\d{1,2})[./](\d{1,2})[./](\d{4})',value)
+    # Outlook copies may use inline values, tab-separated cells or stacked labels.
+    aliases = {
+        'client': ['client', 'contractor', 'company'],
+        'project': ['project', 'project name', 'school', 'school name'],
+        'request_date': ['request date', 'requested date', 'date requested'],
+        'inspection_date': ['inspected on', 'inspection date'],
+        'requested_by': ['request by', 'requested by', 'requester', 'requested by company'],
+        'address': ['address', 'site address', 'project address', 'school address'],
+        'permit': ['permit#', 'permit #', 'permit', 'permit number', 'permit no.', 'permit no'],
+        'drawings_on_site': ['pe drawings on site?', 'pe drawings on site', 'drawings on site?', 'drawings on site'],
+        'drawings_approved': ['drawings dob/sca approved?', 'drawings dob/sca approved', 'drawings approved?', 'drawings approved'],
+    }
+    lookup = {label.casefold(): key for key, names in aliases.items() for label in names}
+    names = '|'.join(re.escape(n) for n in sorted(lookup, key=len, reverse=True))
+    label_re = re.compile(r'^(' + names + r')(?:\s*:\s*|\t+|$)(.*)$', re.I)
+    # Each copied table cell can be separated by a tab, including several labels
+    # on one row. Flatten cells first so inline and stacked layouts share a parser.
+    lines = [re.sub(r'\s+', ' ', cell).strip() for line in text.replace('\u00a0', ' ').splitlines()
+             for cell in line.split('\t') if cell.strip()]
+    values = {}; key = None
+    for line in lines:
+        match = label_re.match(line)
+        if match:
+            key = lookup[match.group(1).casefold()]
+            values.setdefault(key, [])
+            if match.group(2).strip(): values[key].append(match.group(2).strip())
+        elif key:
+            # Do not consume a different form section/header as a value.
+            if re.match(r'^(?:section\s*\d|product inspected|attendees|location|to all)\b', line, re.I) or re.match(r'^[\w /?#.-]+:\s*$', line):
+                key = None
+            else:
+                values[key].append(line)
+    result = {}
+    for field, parts in values.items():
+        if not parts: continue
+        value = parts[0]
+        if field.endswith('_date'):
+            found = re.fullmatch(r'(\d{1,2})[./](\d{1,2})[./](\d{4})', value)
+            try:
                 if found:
-                    m,d,y=map(int,found.groups())
-                    try: value=date(y,m,d).isoformat()
-                    except ValueError: continue
-                else: continue
-            result[labels[line]]=value
+                    m, d, y = map(int, found.groups()); value = date(y, m, d).isoformat()
+                else: value = date.fromisoformat(value).isoformat()
+            except ValueError: continue
+        if field in ('drawings_on_site', 'drawings_approved'):
+            # Alternatives/questions/instructions are not an affirmative answer.
+            answer = value.casefold().strip('. ')
+            if answer not in ('yes', 'no', 'na', 'n/a', 'not applicable'): continue
+            value = {'yes': 'Yes', 'no': 'No'}.get(answer, 'NA')
+        if field in ('requested_by', 'address'):
+            # Keep wrapped contact/address lines, but stop at prose/instructions.
+            selected = [value]
+            for part in parts[1:3]:
+                if re.search(r'\b(?:shall|must|responsible|inspection report|please)\b', part, re.I): break
+                selected.append(part)
+            value = ' '.join(selected)
+        if value.casefold() in ('[pending confirmation]', 'pending', 'tbd', 'yes/no', 'yes / no'): continue
+        result[field] = value
     patterns={'SH':r'Sidewalk Shed-([IVXLCDM\d]+)-Inspection-', 'SF':r'Supported Scaffold-([IVXLCDM\d]+)-Inspection-'}
+    types = {k for k, p in patterns.items() if re.search(p, text, re.I)}
+    if 'permit' in result and (len(types) > 1 or not re.fullmatch(r'[A-Z0-9][A-Z0-9-]*', result['permit'], re.I)):
+        result.pop('permit')
     equipment=[]
     for key,pattern in patterns.items():
         subject=re.search(r'(\d{4}-\d\d-\d\d) (.+?) '+pattern,text,re.I)
@@ -124,6 +169,10 @@ def calendar_candidates(text):
         if subject:
             item.update(inspection_date=subject.group(1),subject_project=subject.group(2),inspection_code=subject.group(3))
         if permit: item['permit']=permit.group(1)
+        elif 'permit' in result:
+            # An unlabeled equipment permit is safe only for one equipment type.
+            if types == {key} and re.fullmatch(r'[A-Z0-9][A-Z0-9-]*', result['permit'], re.I):
+                item['permit'] = result['permit']
         if len(item)>1: equipment.append(item)
     return {'fields':result,'equipment':equipment,'confirmed':False,
             'notice':'Calendar template alternatives are not inspection results. Confirm all candidates.'}
