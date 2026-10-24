@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import uuid
+from zipfile import ZipFile
 from email import policy
 from email.parser import BytesParser
 from PIL import Image,ImageDraw
@@ -31,6 +32,7 @@ class CellMapping(unittest.TestCase):
                     data=sample_report(equipment+'-'+status);path=Path(directory)/(equipment+status+'.docx')
                     report_agent.fill_report(data,path,draft=True);doc=Document(path);table=doc.tables[1]
                     cells=report_agent.physical_cells
+                    self.assertFalse(doc._element.xpath('.//w:drawing'),'Original example seals must not appear on drafts')
                     for row,label in ((1,'Client:'),(2,'Request date:'),(3,'Product Inspected:'),(4,'Permit#:'),(5,'Address:'),(6,'PE Drawings on site?'),(7,'Drawings DOB/SCA approved?')):
                         self.assertEqual(cells(table.rows[row])[0].text.strip(),label,(equipment,status,row))
                     self.assertEqual(cells(table.rows[1])[1].text,data['client'])
@@ -146,12 +148,24 @@ class LifecycleAndStamp(unittest.TestCase):
         self.assertIn('PE signature/seal:',reader.pages[1].extract_text())
         self.assertNotIn('PE signature/seal:',reader.pages[0].extract_text())
         self.assertTrue(len(list(reader.pages[1].images)))
+        text=reader.pages[1].extract_text()
+        self.assertLess(text.index('PE signature/seal:'),text.index('Section 3'),'Stamp must be drawn underneath original table/text')
         eml=next(a for a in body['artifacts'] if a['filename'].endswith('.eml'))
         message=BytesParser(policy=policy.default).parsebytes(self.client.get('/artifacts/'+eml['id'],headers=HEADERS).content)
         self.assertEqual(next(message.iter_attachments()).get_payload(decode=True),pdf_bytes)
         docx=next(a for a in body['artifacts'] if a['filename'].endswith('.docx'))
         doc=Document(BytesIO(self.client.get('/artifacts/'+docx['id'],headers=HEADERS).content))
         self.assertEqual(len(doc.tables[2].rows),2,'P.E. must not create another pending PE')
+        self.assertEqual(body['reports'][0]['visual_stamp_docx']['layer'],'behind_text')
+        anchors=doc._element.xpath('.//wp:anchor')
+        self.assertEqual(len(anchors),1)
+        self.assertEqual(anchors[0].get('behindDoc'),'1')
+        self.assertEqual(anchors[0].get('layoutInCell'),'0')
+        cell=anchors[0].getparent().getparent().getparent().getparent()
+        self.assertIn('Section 3',''.join(cell.itertext()))
+        with ZipFile(BytesIO(self.client.get('/artifacts/'+docx['id'],headers=HEADERS).content)) as package:
+            self.assertIn(test_image(),[package.read(name) for name in package.namelist() if name.startswith('word/media/')])
+
         wrong=self.client.post('/signing-assets',params={'owner':'Another engineer'},headers=HEADERS,content=test_image()).json()['id']
         self.assertEqual(self.client.post('/inspections/'+identity+'/reports',headers=HEADERS,json={'stamp_id':wrong,'stamp_reviewed':True}).status_code,422)
         self.assertEqual(self.client.delete('/signing-assets/'+asset,headers=HEADERS).status_code,200)

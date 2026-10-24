@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from PIL import Image
 from backend.core import uid
-from report_agent import is_pe
+from report_agent import is_pe,example_stamp_rel_ids,strip_example_stamp_nodes
 
 
 def initialize(store):
@@ -61,8 +61,54 @@ def apply(pdf,asset):
     buffer=BytesIO();canvas=Canvas(buffer,pagesize=(width,height))
     canvas.drawImage(ImageReader(asset['path']),width-235,height-260,width=180,height=144,preserveAspectRatio=True,anchor='c',mask='auto')
     canvas.setFont('Helvetica',8);canvas.drawRightString(width-55,height-270,'PE signature/seal: '+asset['owner'])
-    canvas.save();buffer.seek(0);page.merge_page(PdfReader(buffer).pages[0])
+    canvas.save();buffer.seek(0);page.merge_page(PdfReader(buffer).pages[0],over=False)
     output=pdf.with_suffix('.stamping.tmp')
     with output.open('wb') as stream:writer.write(stream)
     output.replace(pdf)
-    return {'asset_id':asset['id'],'sha256':asset['sha256'],'owner':asset['owner'],'page':2,'cryptographic_signature':False}
+    return {'asset_id':asset['id'],'sha256':asset['sha256'],'owner':asset['owner'],'page':2,'layer':'behind_text','cryptographic_signature':False}
+
+
+def apply_docx(docx,asset):
+    """Embed the original stamp as a floating Word Behind Text image in Section 3."""
+    from copy import deepcopy
+    from zipfile import ZipFile
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.shared import Pt
+    doc=Document(docx)
+    strip_example_stamp_nodes(doc._element,example_stamp_rel_ids(doc))
+    paragraph=next((table.cell(0,0).paragraphs[0] for table in doc.tables
+                    if re.search(r'Section\s*3\b',table.cell(0,0).text,re.I)),None)
+    if paragraph is None:
+        paragraph=next((p for p in doc.paragraphs if re.search(r'Section\s*3\b',p.text,re.I)),None)
+    if paragraph is None:raise ValueError('A Section 3 heading is required to anchor the stamp in the DOCX')
+    with Image.open(asset['path']) as image:iw,ih=image.size
+    scale=min(180/iw,144/ih);width=iw*scale;height=ih*scale
+    inline=paragraph.add_run().add_picture(asset['path'],width=Pt(width),height=Pt(height))._inline
+    anchor=OxmlElement('wp:anchor')
+    for key,value in {'distT':'0','distB':'0','distL':'0','distR':'0','simplePos':'0','relativeHeight':'0','behindDoc':'1','locked':'0','layoutInCell':'0','allowOverlap':'1'}.items():anchor.set(key,value)
+    simple=OxmlElement('wp:simplePos');simple.set('x','0');simple.set('y','0');anchor.append(simple)
+    for axis,offset in [('H',doc.sections[0].page_width.pt-235+(180-width)/2),('V',116+(144-height)/2)]:
+        position=OxmlElement('wp:position'+axis);position.set('relativeFrom','page')
+        amount=OxmlElement('wp:posOffset');amount.text=str(int(Pt(offset)));position.append(amount);anchor.append(position)
+    anchor.append(deepcopy(inline.extent))
+    effect=OxmlElement('wp:effectExtent')
+    for key in ('l','t','r','b'):effect.set(key,'0')
+    anchor.append(effect);anchor.append(OxmlElement('wp:wrapNone'))
+    for child in inline:
+        if child.tag.rsplit('}',1)[-1] in ('docPr','cNvGraphicFramePr','graphic'):
+            copied=deepcopy(child)
+            if child.tag.rsplit('}',1)[-1]=='docPr':copied.set('descr','PE signature/seal: '+asset['owner'])
+            anchor.append(copied)
+    inline.getparent().replace(inline,anchor)
+    rendered=BytesIO();doc.save(rendered);rendered.seek(0)
+    # Keep all unrelated original template package parts byte-for-byte unchanged.
+    output=docx.with_suffix('.stamping.tmp')
+    with ZipFile(docx) as original,ZipFile(rendered) as updated,ZipFile(output,'w') as result:
+        changed={'word/document.xml','word/_rels/document.xml.rels','[Content_Types].xml'}
+        old_names=set(original.namelist())
+        for item in original.infolist():result.writestr(item,updated.read(item.filename) if item.filename in changed else original.read(item.filename))
+        for item in updated.infolist():
+            if item.filename not in old_names:result.writestr(item,updated.read(item.filename))
+    output.replace(docx)
+    return {'asset_id':asset['id'],'sha256':asset['sha256'],'owner':asset['owner'],'anchor':'Section 3','layer':'behind_text','cryptographic_signature':False}

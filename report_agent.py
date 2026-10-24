@@ -6,6 +6,7 @@ from email.message import EmailMessage
 from email.policy import SMTP
 from html import escape
 import json
+import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -20,6 +21,28 @@ from lxml import etree
 ROOT = Path(__file__).resolve().parent
 NS = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
 W = '{' + NS['w'] + '}'
+
+
+# The supplied original masters contain these two example PE seal images.
+# Remove only these audited images, preserving logos and user-supplied artwork.
+EXAMPLE_STAMP_HASHES = {
+    'ebbcc91f3e0ba726a792da6f4d62cad2a35a465444a8865af0e37e9d01c9cd70',
+    'fec9042ab2d600092143bbc6052a9e9a53a79182003cd1d0a6a206f3ac095125',
+}
+
+
+def example_stamp_rel_ids(doc):
+    return {identity for identity,rel in doc.part.rels.items()
+            if not rel.is_external and 'image' in rel.reltype
+            and hashlib.sha256(rel.target_part.blob).hexdigest() in EXAMPLE_STAMP_HASHES}
+
+
+def strip_example_stamp_nodes(root,relationships):
+    changed=False
+    for drawing in list(root.iter(W+'drawing')):
+        if any(node.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') in relationships for node in drawing.iter()):
+            drawing.getparent().remove(drawing);changed=True
+    return changed
 
 
 def require(value, name):
@@ -161,13 +184,14 @@ def template_values(data):
 
 def fill_placeholders(data, output, source, mapping, reserve_signature=False):
     values=template_values(data)
+    example_ids=example_stamp_rel_ids(Document(source))
     parser=etree.XMLParser(resolve_entities=False,load_dtd=False,no_network=True)
     with ZipFile(source) as original, ZipFile(output,'w') as result:
         for item in original.infolist():
             content=original.read(item.filename)
             if item.filename.startswith('word/') and item.filename.endswith('.xml'):
                 root=etree.fromstring(content,parser)
-                changed=False
+                changed=strip_example_stamp_nodes(root,example_ids) if item.filename=='word/document.xml' else False
                 for paragraph in root.iter(W+'p'):
                     # Tokens may be split across Word runs. Replace from the right so offsets remain stable.
                     nodes=list(paragraph.iter(W+'t'))
@@ -250,6 +274,7 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         return fill_placeholders(data,output,source,mapping or {},reserve_signature)
     if template_mode != "legacy": raise ValueError("Unsupported template mode")
     doc = Document(source)
+    strip_example_stamp_nodes(doc._element,example_stamp_rel_ids(doc))
     if data['equipment']=='OT': prepare_other_layout(doc,data)
     for paragraph in doc.paragraphs:
         if '347-730-6990' in paragraph.text:

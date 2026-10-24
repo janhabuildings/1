@@ -391,7 +391,8 @@ def create_app(settings=None):
             if settings.office_bin:
                 import os
                 os.environ['DSENY_OFFICE_BIN']=settings.office_bin
-            return runner.generate(request,output,templates=selected,pdf_postprocess=(lambda pdf,report:signatures.apply(pdf,stamp)) if stamp else None)
+            return runner.generate(request,output,templates=selected,pdf_postprocess=(lambda pdf,report:signatures.apply(pdf,stamp)) if stamp else None,
+                                   docx_postprocess=(lambda docx,report:signatures.apply_docx(docx,stamp)) if stamp else None)
         try: manifest=await asyncio.to_thread(work)
         except (ValueError,KeyError,TypeError,IndexError) as error: raise HTTPException(422,str(error))
         if identity and identity in lifecycle.deletions(store)['inspections']:
@@ -421,10 +422,10 @@ def create_app(settings=None):
             raise HTTPException(409,'Inspection was deleted during generation; no new files were retained')
         # Server filesystem locations are not public download URLs.
         summaries=[{key:value for key,value in report.items() if key in
-                    ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error','template_version','visual_stamp')}
+                    ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error','template_version','visual_stamp','visual_stamp_docx')}
                    for report in manifest['reports']]
         return {'reports':summaries,'artifacts':artifacts,'mailbox_drafts_created':False,
-                'notice':('A visual signature/stamp image was placed on page 2 of No OIs PDFs after your confirmation. This is not a cryptographic digital signature; review before delivery.' if stamp else 'Review rendering and missing facts; no professional signature or seal has been applied.')}
+                'notice':('Your visual signature/stamp image was placed behind Section 3 text in No OIs DOCX files and behind page 2 content in PDFs after your confirmation. This is not a cryptographic digital signature; review before delivery.' if stamp else 'Review rendering and missing facts; no professional signature or seal has been applied.')}
 
     @app.post('/inspections/{identity}/reports',dependencies=[Depends(authorized)])
     async def generate_reports(identity:str,data:ExportInput):

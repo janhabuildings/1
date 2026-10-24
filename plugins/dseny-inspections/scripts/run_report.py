@@ -167,7 +167,7 @@ def check_address(address):
     return address
 
 
-def generate(request, output, renderer='libreoffice', templates=None, pdf_postprocess=None):
+def generate(request, output, renderer='libreoffice', templates=None, pdf_postprocess=None, docx_postprocess=None):
     if renderer not in ('libreoffice','word'):
         raise ValueError('renderer must be libreoffice or word')
     entries=request.get('reports')
@@ -253,6 +253,8 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
             entry.update(status='local_draft_generated',eml=str(eml),gmail_handoff=str(handoff_file))
         except (RuntimeError,subprocess.TimeoutExpired,OSError) as error:
             entry.update(status='conversion_blocked',error=str(error))
+        if docx_postprocess and data['status']=='No OIs':
+            entry['visual_stamp_docx']=docx_postprocess(docx,data)
         result['reports'].append(entry)
     (output/'manifest.json').write_text(json.dumps(result,indent=2))
     return result
