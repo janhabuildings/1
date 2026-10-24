@@ -100,6 +100,8 @@ import Foundation
         cache.media.removeAll { deleted.media.contains($0.id) || deleted.inspections.contains($0.inspectionID) }
         cache.inspections.removeAll { deleted.inspections.contains($0.id) }; cache.dirty.subtract(deleted.inspections)
         let remote = try JSONDecoder().decode([Inspection].self, from: await api.request("/inspections"))
+        let remoteIDs = Set(remote.map(\.id))
+        for local in cache.inspections where !remoteIDs.contains(local.id) && !deleted.inspections.contains(local.id) { cache.dirty.insert(local.id) }
         for inspection in remote where !cache.dirty.contains(inspection.id) {
             if let i = cache.inspections.firstIndex(where: { $0.id == inspection.id }) { cache.inspections[i] = inspection }
             else { cache.inspections.append(inspection) }
