@@ -31,7 +31,7 @@ def require(value, name):
 
 
 def is_pe(title):
-    return re.sub(r'[^A-Z]','',str(title).upper())=='PE'
+    return any(re.sub(r'[^A-Z]','',part.upper())=='PE' for part in re.split(r'[;\n]',str(title)))
 
 
 def physical_cells(row):

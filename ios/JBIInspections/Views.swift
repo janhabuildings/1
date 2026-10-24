@@ -5,6 +5,8 @@ import MessageUI
 import UniformTypeIdentifiers
 import ImageIO
 
+struct ReportRoute: Hashable { let equipment: String }
+
 struct SharedItems: Identifiable { let id = UUID(); var items: [Any] }
 struct MailAttachment { var data: Data; var filename: String }
 struct MailPayload: Identifiable { let id = UUID(); var subject: String; var html: String; var attachments: [MailAttachment]; var sender: String; var to: [String]; var cc: [String] }
@@ -212,6 +214,9 @@ struct InspectionDetail: View {
             if !status.isEmpty { Section { Text(status).font(.caption).textSelection(.enabled) } }
         }
         .navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
+        .navigationDestination(for: ReportRoute.self) { route in
+            ReportFactsEditor(reports: $inspection.reports, project: inspection.project, inspectionDate: inspection.inspection_date, initialEquipment: route.equipment)
+        }
         .onChange(of: inspection) { _, value in store.save(value); scheduleSync() }
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
         .onDisappear { finishRecording() }
@@ -384,9 +389,9 @@ struct InspectionDetail: View {
     }
     private var reports: some View {
         Section("Report facts — inspector review") {
-            ForEach($inspection.reports) { $report in
+            ForEach(inspection.reports) { report in
                 HStack {
-                    NavigationLink(report.displayName + " report") { ReportEditor(report: $report) }
+                    NavigationLink(report.displayName + " report", value: ReportRoute(equipment: report.equipment))
                     Button("Remove", role: .destructive) { removeReportType = report.equipment }.buttonStyle(.borderless)
                 }
             }

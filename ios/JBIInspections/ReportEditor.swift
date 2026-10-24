@@ -1,8 +1,99 @@
 import SwiftUI
 
+enum AttendeeOptions {
+    static let roles = ["Competent Person/Site Supervisor", "Safety Inspector", "Competent Person/ Equipment Installation Supervisor", "Competent Person", "GC’s Project Manager", "CM’s Representative", "Owner’s Representative", "PE"]
+    static let companies = ["NYC SCA", "DSENY Engineering Services PC", "WCC"]
+}
+
+struct ReportFactsEditor: View {
+    @Binding var reports: [ReportDraft]
+    var project: String
+    var inspectionDate: String
+    @State private var selectedEquipment: String
+    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String) {
+        _reports = reports; self.project = project; self.inspectionDate = inspectionDate
+        _selectedEquipment = State(initialValue: initialEquipment)
+    }
+    private var selection: Binding<String> {
+        Binding(get: { selectedEquipment }, set: { equipment in
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            if !reports.contains(where: { $0.equipment == equipment }) {
+                var draft = ReportDraft(equipment: equipment)
+                draft.project = project; draft.inspection_date = inspectionDate
+                reports.append(draft)
+            }
+            selectedEquipment = equipment
+        })
+    }
+    var body: some View {
+        let equipment = selectedEquipment
+        ReportEditor(report: Binding(get: { reports.first(where: { $0.equipment == equipment }) ?? ReportDraft(equipment: equipment) }, set: { value in
+            if let index = reports.firstIndex(where: { $0.equipment == equipment }) { reports[index] = value }
+        }), reportSelection: selection).id(equipment)
+    }
+}
+
+struct MultiChoiceField: View {
+    var label: String
+    @Binding var value: String
+    var options: [String]
+    var separator = "; "
+    @State private var showing = false
+    @State private var query = ""
+    private var selected: [String] {
+        value.components(separatedBy: separator == "\n" ? .newlines : CharacterSet(charactersIn: ";\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            .reduce(into: [String]()) { result, item in if !result.contains(item) { result.append(item) } }
+    }
+    private func toggle(_ option: String) {
+        var items = selected
+        if items.contains(option) { items.removeAll { $0 == option } }
+        else {
+            if option == "NA" { items.removeAll() } else { items.removeAll { $0 == "NA" } }
+            items.append(option)
+        }
+        value = items.joined(separator: separator)
+    }
+    var body: some View {
+        Button { showing = true; query = "" } label: {
+            VStack(alignment: .leading) {
+                Text(label)
+                Text(value.isEmpty ? "Choose one or more…" : value).font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.buttonStyle(.borderless)
+        .sheet(isPresented: $showing) {
+            NavigationStack {
+                List {
+                    if !selected.isEmpty {
+                        Section("Selected — tap to remove") {
+                            ForEach(selected, id: \.self) { option in
+                                Button { toggle(option) } label: { Label(option, systemImage: "checkmark.square.fill") }
+                            }
+                            Button("Clear selections", role: .destructive) { value = "" }
+                        }
+                    }
+                    Section("Suggestions — select multiple") {
+                        ForEach(options.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }, id: \.self) { option in
+                            Button { toggle(option) } label: {
+                                Label(option, systemImage: selected.contains(option) ? "checkmark.square.fill" : "square")
+                            }
+                        }
+                    }
+                    let custom = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !custom.isEmpty && !options.contains(custom) && !selected.contains(custom) {
+                        Button("Add custom: " + custom) { toggle(custom); query = "" }
+                    }
+                }.searchable(text: $query, prompt: "Type to search or add a custom value")
+                .navigationTitle(label)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showing = false } } }
+            }
+        }
+    }
+}
+
 struct ReportEditor: View {
     @Binding var report: ReportDraft
-    @State private var customSiteFields: Set<String> = []
+    var reportSelection: Binding<String>? = nil
     private var siteFields: [(String, String)] {
         report.equipment == "OT" ? [] : report.equipment == "SH" ? [("length_ft", "Approx. length (ft)"), ("sections", "Individual sections"),
             ("height_ft", "Max height (ft)"), ("width_ft", "Max width (ft)")] :
@@ -13,6 +104,13 @@ struct ReportEditor: View {
     }
     var body: some View {
         Form {
+            if let reportSelection {
+                Section("Report type") {
+                    Picker("Report type", selection: reportSelection) {
+                        Text("Shed").tag("SH"); Text("Scaffold").tag("SF"); Text("Other").tag("OT")
+                    }.pickerStyle(.segmented)
+                }
+            }
             Section("Inspection result") {
                 Picker("Result — explicit confirmation", selection: $report.status) {
                     Text("Not confirmed").tag("")
@@ -56,8 +154,8 @@ struct ReportEditor: View {
                 ForEach($report.attendees) { $attendee in
                     VStack {
                         TextField("Name", text: $attendee.name)
-                        TextField("Company / agency", text: $attendee.company)
-                        TextField("Role · PE or P.E. for inspecting engineer", text: $attendee.title)
+                        MultiChoiceField(label: "Company / agency", value: $attendee.company, options: AttendeeOptions.companies)
+                        MultiChoiceField(label: "Role", value: $attendee.title, options: AttendeeOptions.roles)
                         Button("Remove attendee", role: .destructive) { report.attendees.removeAll { $0.id == attendee.id } }.buttonStyle(.borderless)
                     }
                 }.onDelete { report.attendees.remove(atOffsets: $0) }
@@ -93,33 +191,23 @@ struct ReportEditor: View {
                 ForEach($report.open_items) { $finding in
                     VStack {
                         TextField("Location / occurrence", text: $finding.location, axis: .vertical)
-                        TextField("Required corrective action", text: $finding.action, axis: .vertical)
+                        MultiChoiceField(label: "Suggested corrective actions", value: $finding.action, options: CorrectionOptions.byEquipment[report.equipment] ?? [], separator: "\n")
+                        TextField("Edit corrective action wording", text: $finding.action, axis: .vertical)
                         Button("Remove open item", role: .destructive) { report.open_items.removeAll { $0.id == finding.id } }.buttonStyle(.borderless)
                     }
                 }.onDelete { report.open_items.remove(atOffsets: $0) }
                 Button("Add open item") { report.open_items.append(Finding()) }
-                Text("Swipe to remove a finding. No OIs is never inferred from an empty list.").font(.caption)
+                Text("Select only actions matching observed deficiencies. Multiple actions stay in this item’s cell; add separate items for different locations. Swipe to remove an item.").font(.caption)
             }
         }.navigationTitle(report.displayName + " facts")
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar { ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
+            } }
     }
-    @ViewBuilder
     private func siteChoice(_ label: String, key: String, options: [String]) -> some View {
-        let value = report.site[key] ?? ""
-        let custom = customSiteFields.contains(key) || (!value.isEmpty && !options.contains(value))
-        Picker(label, selection: Binding(get: { custom ? "__custom__" : value }, set: { selected in
-            if selected == "__custom__" {
-                customSiteFields.insert(key)
-                if options.contains(report.site[key] ?? "") { report.site[key] = "" }
-            } else {
-                customSiteFields.remove(key)
-                report.site[key] = selected
-            }
-        })) {
-            Text("Not confirmed").tag("")
-            ForEach(options, id: \.self) { option in Text(option).tag(option) }
-            Text("Other / custom").tag("__custom__")
-        }.pickerStyle(.menu)
-        if custom { TextField(label + " · custom description", text: siteBinding(key)) }
+        MultiChoiceField(label: label, value: siteBinding(key), options: options)
     }
     private func siteBinding(_ key: String, defaultValue: String = "") -> Binding<String> {
         Binding(get: { report.site[key] ?? defaultValue }, set: { report.site[key] = $0 })

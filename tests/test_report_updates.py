@@ -66,6 +66,17 @@ class CellMapping(unittest.TestCase):
                 for expected in ('Hoist Inspected?','Chute Inspected?','North courtyard','48','Example Hoist','East bay','36','Example Chute'):
                     self.assertIn(expected,text)
 
+    def test_multiline_corrective_actions_and_selected_roles_remain_in_their_cells(self):
+        data=sample_report('SF-OIs')
+        data['attendees'][0]['title']='PE; Owner’s Representative'
+        data['attendees'][0]['company']='DSENY Engineering Services PC; Example Company'
+        data['open_items'][0]['action']='Secure the connections; verify bolts.\nInstall missing edge protection.'
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'report.docx';report_agent.fill_report(data,path,draft=True)
+            doc=Document(path)
+            self.assertIn('PE; Owner’s Representative',doc.tables[2].rows[1].cells[-1].text)
+            self.assertEqual(doc.tables[4].rows[-1].cells[-1].text,data['open_items'][0]['action'])
+
 
 class LifecycleAndStamp(unittest.TestCase):
     def setUp(self):
@@ -73,7 +84,7 @@ class LifecycleAndStamp(unittest.TestCase):
         self.client=TestClient(self.app)
     def tearDown(self):self.client.close();self.temp.cleanup()
     def inspection(self,status='No OIs'):
-        report=sample_report('OT-'+status);report['attendees'][0]['title']='P.E.'
+        report=sample_report('OT-'+status);report['attendees'][0]['title']='P.E.; Owner’s Representative'
         result=self.client.post('/inspections',headers=HEADERS,json={'title':'Sync fixture','project':report['project'],
             'inspection_date':report['inspection_date'],'reports':[report]})
         self.assertEqual(result.status_code,201,result.text);return result.json()

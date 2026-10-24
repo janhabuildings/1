@@ -43,6 +43,20 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#workspace').wait_for(state='visible')
         from playwright.sync_api import expect
         expect(self.page.locator('#save')).to_be_enabled()
+    def choose_multiple_value(self,label,option):
+        search=self.page.get_by_label('Search '+label,exact=True)
+        control=search.locator('..')
+        if control.get_attribute('open') is None:control.locator('summary').click()
+        search.fill(option)
+        self.page.get_by_role('checkbox',name=label+': '+option,exact=True).click()
+        search.fill('')
+    def add_custom_value(self,label,value):
+        search=self.page.get_by_label('Search '+label,exact=True)
+        control=search.locator('..')
+        if control.get_attribute('open') is None:control.locator('summary').click()
+        search.fill(value)
+        control.get_by_role('button',name='Add custom: '+value,exact=True).click()
+
     def test_login_rejects_bad_token_without_exposing_inspection_data(self):
         self.page.locator('#token').fill('incorrect-token')
         self.page.get_by_role('button',name='Connect',exact=True).click()
@@ -64,8 +78,8 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#client').fill('Fixture contractor')
         self.page.locator('#add-attendee').click()
         self.page.get_by_placeholder('Name',exact=True).fill('Fixture Inspector')
-        self.page.get_by_placeholder('Company / agency').fill('DSENY Engineering Services PC')
-        self.page.get_by_placeholder('Role · PE for inspecting engineer').fill('PE')
+        self.choose_multiple_value('Company / agency','DSENY Engineering Services PC')
+        self.choose_multiple_value('Role','PE')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         expect(self.page.locator('#save')).to_be_enabled()
@@ -190,17 +204,15 @@ class WebWorkflow(unittest.TestCase):
         self.connect()
         self.page.locator('[data-tab=reports]').click()
         self.page.locator('#add-SF').click()
-        tie=self.page.get_by_label('Tie type',exact=True)
-        dunnage=self.page.get_by_label('Dunnage type',exact=True)
-        self.assertEqual(tie.input_value(), '')
-        self.assertEqual(dunnage.input_value(), '')
+        self.assertIn('Choose one or more',self.page.get_by_label('Search Tie type').locator('..').locator('summary').text_content())
         self.page.get_by_label('Hoist inspected?',exact=True).select_option('Yes')
         self.page.get_by_label('Hoist location(s)',exact=True).fill('North courtyard')
         self.page.get_by_label('Hoist height (ft)',exact=True).fill('48')
         self.page.get_by_label('Hoist model',exact=True).fill('Example model')
-        tie.select_option('Concrete Wall Anchor')
-        dunnage.select_option('__custom__')
-        self.page.get_by_label('Dunnage type · custom description',exact=True).fill('Timber pads on sleepers')
+        self.choose_multiple_value('Tie type','Concrete Wall Anchor')
+        self.choose_multiple_value('Tie type','Steel Beam Anchor')
+        self.choose_multiple_value('Dunnage type','Roof')
+        self.add_custom_value('Dunnage type','Timber pads on sleepers')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         record=self.app.state.store.list()[0]
@@ -209,11 +221,39 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(saved['reports'][0]['site']['hoist_locations'], 'North courtyard')
         self.assertEqual(saved['reports'][0]['site']['hoist_height'], '48')
         self.assertEqual(saved['reports'][0]['site']['hoist_model'], 'Example model')
-        self.assertEqual(saved['reports'][0]['site']['tie_type'], 'Concrete Wall Anchor')
-        self.assertEqual(saved['reports'][0]['site']['dunnage_type'], 'Timber pads on sleepers')
+        self.assertEqual(saved['reports'][0]['site']['tie_type'], 'Concrete Wall Anchor; Steel Beam Anchor')
+        self.assertEqual(saved['reports'][0]['site']['dunnage_type'], 'Roof; Timber pads on sleepers')
         self.page.locator('#add-SH').click()  # Re-render must preserve custom values.
-        self.assertEqual(self.page.get_by_label('Dunnage type · custom description',exact=True).input_value(), 'Timber pads on sleepers')
+        self.assertIn('Roof; Timber pads on sleepers',self.page.get_by_label('Search Dunnage type').locator('..').locator('summary').text_content())
         self.assertEqual(self.errors, [])
+
+    def test_corrective_actions_search_multiselect_custom_and_save(self):
+        from playwright.sync_api import expect
+        from scripts.build_action_options import extract_actions
+        self.connect()
+        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('#add-SH').click()
+        self.page.get_by_role('button',name='+ Add open item',exact=True).click()
+        actions=extract_actions()['SH']
+        first=next(a for a in actions if ';' in a)
+        second=next(a for a in actions if a!=first)
+        self.choose_multiple_value('Suggested corrective actions',first)
+        self.choose_multiple_value('Suggested corrective actions',second)
+        self.add_custom_value('Suggested corrective actions','Install additional bracing; confirm connections.')
+        expected=first+'\n'+second+'\nInstall additional bracing; confirm connections.'
+        self.assertEqual(self.page.get_by_label('Corrective action',exact=True).input_value(),expected)
+        self.page.get_by_label('Location / occurrence',exact=True).fill('North entrance')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        saved=self.app.state.store.list()[0]
+        record=self.app.state.store.get(saved['id'])
+        self.assertEqual(record['reports'][0]['open_items'][0]['action'],expected)
+        self.page.reload();self.connect()
+        self.page.locator('#saved').select_option(saved['id'])
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
+        self.page.locator('[data-tab=reports]').click()
+        expect(self.page.get_by_label('Corrective action',exact=True)).to_have_value(expected)
+        self.assertEqual(self.errors,[])
 
     def test_multiple_calendar_titles_require_a_choice_and_save_exact_title(self):
         from playwright.sync_api import expect
@@ -266,6 +306,42 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.locator('#title').input_value(),title)
         self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-24')
         self.assertEqual(self.errors, [])
+
+    def test_editing_does_not_block_other_reports_and_attendee_dropdowns_save(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.locator('#add-attendee').click()
+        self.page.get_by_placeholder('Name',exact=True).fill('Example Engineer')
+        self.choose_multiple_value('Role','Competent Person/ Equipment Installation Supervisor')
+        self.choose_multiple_value('Role','PE')
+        self.choose_multiple_value('Company / agency','NYC SCA')
+        self.add_custom_value('Company / agency','Example Company')
+        roles=self.page.get_by_label('Search Role',exact=True).locator('..')
+        roles.get_by_role('button',name='Remove PE',exact=True).click()
+        self.choose_multiple_value('Role','PE')
+        self.page.get_by_label('Search Role',exact=True).fill('Competent')
+        self.assertEqual(roles.get_by_role('checkbox',name='Role: Owner’s Representative',exact=True).count(),0)
+        self.page.get_by_label('Search Role',exact=True).fill('')
+        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('#add-SH').click()
+        self.page.get_by_label('Permit number',exact=True).fill('SH-123')
+        self.page.locator('#add-SF').click()
+        scaffold=self.page.locator('.report-card').filter(has=self.page.get_by_role('heading',name='Scaffold',exact=True))
+        scaffold.get_by_label('Permit number',exact=True).fill('SF-456')
+        self.page.locator('#add-OT').click()
+        other=self.page.locator('.report-card').filter(has=self.page.get_by_role('heading',name='Other',exact=True))
+        other.get_by_label('Item name (for unknown / custom)',exact=True).fill('Temporary support')
+        shed=self.page.locator('.report-card').filter(has=self.page.get_by_role('heading',name='Shed',exact=True))
+        self.assertEqual(shed.get_by_label('Permit number',exact=True).input_value(),'SH-123')
+        self.assertEqual(scaffold.get_by_label('Permit number',exact=True).input_value(),'SF-456')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        saved=self.app.state.store.get(self.app.state.store.list()[0]['id'])
+        self.assertEqual(len(saved['reports']),3)
+        for report in saved['reports']:
+            self.assertEqual(report['attendees'][0]['company'],'NYC SCA; Example Company')
+            self.assertEqual(report['attendees'][0]['title'],'Competent Person/ Equipment Installation Supervisor; PE')
+        self.assertEqual(self.errors,[])
 
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
