@@ -116,6 +116,30 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#code-results')).to_contain_text('2025')
         self.assertEqual(self.errors,[])
         self.assertEqual(self.page.evaluate('localStorage.length'),0)
+    def test_delete_evidence_and_inspection_controls(self):
+        from playwright.sync_api import expect
+        from tests.test_report_updates import test_image
+        self.connect()
+        self.page.locator('#title').fill('Delete fixture')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        identity=self.app.state.store.list()[0]['id']
+        self.page.locator('[data-tab=evidence]').click()
+        image=Path(self.temp.name)/'delete-image.png';image.write_bytes(test_image())
+        self.page.locator('#upload').set_input_files(str(image))
+        expect(self.page.locator('#media-list')).to_contain_text('Delete evidence')
+        self.page.once('dialog',lambda dialog:dialog.accept())
+        self.page.get_by_role('button',name='Delete evidence',exact=True).click()
+        expect(self.page.locator('#media-empty')).to_be_visible()
+        self.page.locator('[data-tab=inspection]').click()
+        self.page.once('dialog',lambda dialog:dialog.accept())
+        self.page.locator('#delete-inspection').click()
+        expect(self.page.locator('#save-state')).to_contain_text('New inspection')
+        self.assertEqual(self.app.state.store.list(),[])
+        from backend.lifecycle import deletions
+        self.assertIn(identity,deletions(self.app.state.store)['inspections'])
+        self.assertEqual(self.errors,[])
+
     def test_other_unknown_name_is_saved_without_scaffold_dimensions(self):
         from playwright.sync_api import expect
         self.connect()

@@ -49,7 +49,7 @@ def prepare(data):
             if not attendee.get(key):
                 attendee[key] = PENDING
                 missing.append(f'attendees[{i}].{key}')
-    if not any(a['title'].strip().upper() == 'PE' for a in data['attendees']):
+    if not any(reports.is_pe(a['title']) for a in data['attendees']):
         data['attendees'].append({'name': PENDING, 'company':'DSENY Engineering Services PC','title':'PE'})
         missing.append('inspecting_pe')
     if data.get('equipment')=='OT':
@@ -140,6 +140,14 @@ def email_html(path):
     # Page counters from the Word document do not belong in an inline report.
     for node in tree.xpath('//div[@title="footer"] | //meta[@name="author" or @name="changedby"]'):
         node.getparent().remove(node)
+    body=tree.find('body')
+    if body is not None: body.set('style',(body.get('style','')+';margin:0;padding:0;width:100%;'))
+    for table in tree.xpath('//table'):
+        table.set('width','100%');table.set('style',table.get('style','')+';width:100%;border-collapse:collapse;table-layout:fixed;')
+    for paragraph in tree.xpath('//p'):
+        text=' '.join(paragraph.text_content().split())
+        if '39th Avenue' in text or '39 th Avenue' in text or ('347-730-6990' in text):
+            paragraph.set('style','margin:0 0 12pt 0;width:100%;background-color:#000000;color:#ffffff;padding:3pt;')
     return html.tostring(tree,encoding='unicode',method='html')
 
 
@@ -149,7 +157,7 @@ def check_address(address):
     return address
 
 
-def generate(request, output, renderer='libreoffice', templates=None):
+def generate(request, output, renderer='libreoffice', templates=None, pdf_postprocess=None):
     if renderer not in ('libreoffice','word'):
         raise ValueError('renderer must be libreoffice or word')
     entries=request.get('reports')
@@ -181,7 +189,7 @@ def generate(request, output, renderer='libreoffice', templates=None):
         docx=folder/(safe+' - DRAFT.docx')
         selected=(templates or {}).get(data['equipment']+'-'+data['status'])
         options={} if selected is None else {'template':selected['path'],'template_mode':selected['mode'],'mapping':selected.get('mapping',{})}
-        reports.fill_report(data,docx,draft=True,**options)
+        reports.fill_report(data,docx,draft=True,reserve_signature=bool(pdf_postprocess and data['status']=='No OIs'),**options)
         audit=font_audit(docx)
         entry={'equipment':data['equipment'],'subject':title,'docx':str(docx),'missing_fields':missing,
                'font_audit':audit,'renderer':renderer,'delivery_ready':False,'status':'docx_generated',
@@ -191,7 +199,7 @@ def generate(request, output, renderer='libreoffice', templates=None):
         if selected:
             entry['template_version']={key:selected[key] for key in ('id','sha256')}
         if data['status']=='No OIs':
-            entry['review_required'].append('PE must sign/seal the final PDF; conversion is not a signature')
+            entry['review_required'].append('Review the applied visual signature/stamp image and final PDF before delivery' if pdf_postprocess else 'PE must sign/seal the final PDF; conversion is not a signature')
         try:
             attachments=[]
             if data['status']=='OIs':
@@ -201,6 +209,7 @@ def generate(request, output, renderer='libreoffice', templates=None):
                 entry['html_file']=str(html_file)
             else:
                 pdf=office_convert(docx,folder,'pdf',renderer)
+                if pdf_postprocess: entry['visual_stamp']=pdf_postprocess(pdf,data)
                 entry['pdf']=str(pdf)
                 attachments=[{'path':str(pdf),'filename':pdf.name,'mime_type':'application/pdf',
                               'sha256':hashlib.sha256(pdf.read_bytes()).hexdigest()}]
@@ -208,9 +217,9 @@ def generate(request, output, renderer='libreoffice', templates=None):
                       'Certification for use is included in the conclusion in the attached PDF.\n'
                       'See attached; please print & keep at the jobsite. It is the responsibility of the contractor '
                       'to ensure these reports are forwarded to all appropriate parties.\n\nRegards,\n'+
-                      next(a['name'] for a in data['attendees'] if a['title'].strip().upper()=='PE'))
+                      next(a['name'] for a in data['attendees'] if reports.is_pe(a['title'])))
                 if data['equipment']=='OT':
-                    body='Dear Client,\n\nPlease see the attached unsigned inspection review draft for '+reports.product(data)+'. No open items were reported for the inspected locations. Review scope and findings before delivery.\n\nRegards,\n'+next(a['name'] for a in data['attendees'] if a['title'].strip().upper()=='PE')
+                    body='Dear Client,\n\nPlease see the attached inspection review draft for '+reports.product(data)+'. No open items were reported for the inspected locations. Review scope and findings before delivery.\n\nRegards,\n'+next(a['name'] for a in data['attendees'] if reports.is_pe(a['title']))
                 content='<html><body>'+''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in body.split('\n\n'))+'</body></html>'
                 html_file=folder/(safe+' - Cover.html');html_file.write_text(content)
                 entry['html_file']=str(html_file)

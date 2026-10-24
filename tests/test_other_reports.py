@@ -66,7 +66,7 @@ class OtherReports(unittest.TestCase):
                     doc=next(a for a in body['artifacts'] if a['mime'].endswith('wordprocessingml.document'))
                     self.assertEqual(doc['equipment'],'OT')
                     content=client.get('/artifacts/'+doc['id'],headers=HEADERS).content
-                    self.assertIn('Temporary Debris Screen',Document(BytesIO(content)).tables[1].cell(3,1).text)
+                    self.assertIn('Temporary Debris Screen',report_agent.physical_cells(Document(BytesIO(content)).tables[1].rows[3])[1].text)
                     if status=='No OIs':
                         pdf=next(a for a in body['artifacts'] if a['mime']=='application/pdf')
                         self.assertTrue(client.get('/artifacts/'+pdf['id'],headers=HEADERS).content.startswith(b'%PDF-'))

@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 from zipfile import ZipFile
 from docx import Document
+from docx.table import _Cell
+from docx.shared import Inches
 from lxml import etree
 
 ROOT = Path(__file__).resolve().parent
@@ -26,6 +28,27 @@ def require(value, name):
     if any(ord(c) < 32 and c not in '\n\t' for c in value):
         raise ValueError(f'Invalid control character in {name}')
     return value.strip()
+
+
+def is_pe(title):
+    return re.sub(r'[^A-Z]','',str(title).upper())=='PE'
+
+
+def physical_cells(row):
+    return [_Cell(tc,row._parent) for tc in row._tr.tc_lst]
+
+
+def separate_sections(doc):
+    targets=[table._element for table in list(doc.tables)[2:5]]
+    if len(doc.tables)==4:
+        section=next((p._p for p in doc.paragraphs if p.text.strip().startswith("Section 4")),None)
+        if section is not None: targets.append(section)
+    for target in targets:
+        for _ in range(2):
+            paragraph=etree.Element(W+'p');props=etree.SubElement(paragraph,W+'pPr')
+            spacing=etree.SubElement(props,W+'spacing')
+            for key,value in (('before','0'),('after','0'),('line','240'),('lineRule','auto')):spacing.set(W+key,value)
+            target.addprevious(paragraph)
 
 
 def validate(data, *, draft=False):
@@ -48,7 +71,7 @@ def validate(data, *, draft=False):
     for attendee in attendees:
         for name in ('name', 'company', 'title'):
             require(attendee.get(name), 'attendee.' + name)
-    if not any(a['title'].strip().upper() == 'PE' for a in attendees):
+    if not any(is_pe(a['title']) for a in attendees):
         raise ValueError('An inspecting PE attendee must be provided')
     items = data.get('open_items')
     if not isinstance(items, list):
@@ -101,8 +124,14 @@ def set_rows(table, start, entries):
         table._tbl.remove(row._tr)
     for entry in entries:
         table._tbl.append(deepcopy(exemplar))
-        for cell, value in zip(table.rows[-1].cells, entry):
-            replace_cell(cell, value)
+        for index,(cell,value) in enumerate(zip(physical_cells(table.rows[-1]),entry)):
+            replace_cell(cell,value)
+            if index==0:
+                for paragraph in cell.paragraphs:
+                    props=paragraph._p.get_or_add_pPr()
+                    old=props.find(W+'numPr')
+                    if old is not None: props.remove(old)
+                    num=etree.SubElement(props,W+'numPr');etree.SubElement(num,W+'numId').set(W+'val','0')
 
 
 # Supported stable placeholders; unknown fields are never silently dropped.
@@ -127,7 +156,7 @@ def template_values(data):
     return result
 
 
-def fill_placeholders(data, output, source, mapping):
+def fill_placeholders(data, output, source, mapping, reserve_signature=False):
     values=template_values(data)
     parser=etree.XMLParser(resolve_entities=False,load_dtd=False,no_network=True)
     with ZipFile(source) as original, ZipFile(output,'w') as result:
@@ -166,44 +195,55 @@ def fill_placeholders(data, output, source, mapping):
                         if first!=last:
                             for _,_,middle in offsets[first+1:last]: middle.text=''
                             end_node.text=suffix
+                if reserve_signature and item.filename=='word/document.xml':
+                    for section in root.findall('.//w:sectPr',NS):
+                        margin=section.find(W+'pgMar')
+                        if margin is not None: margin.set(W+'bottom',str(max(4320,int(margin.get(W+'bottom','0')))))
+                    changed=True
                 if changed: content=etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
             result.writestr(item,content)
     return source
 
 
-def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None):
+def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None, reserve_signature=False):
     validate(data, draft=draft)
     variant = 'Ois' if data['status'] == 'OIs' else 'N-Ois'
     source = ROOT / 'templates' / ('New Template Full.docx' if data['equipment']=='OT' else f'New Template {data["equipment"]}-{variant}.docx')
     if template is not None: source=Path(template)
     if template_mode == "placeholders":
-        return fill_placeholders(data,output,source,mapping or {})
+        return fill_placeholders(data,output,source,mapping or {},reserve_signature)
     if template_mode != "legacy": raise ValueError("Unsupported template mode")
     doc = Document(source)
     if data['equipment']=='OT': prepare_other_layout(doc,data)
+    for paragraph in doc.paragraphs:
+        if '347-730-6990' in paragraph.text:
+            props=paragraph._p.get_or_add_pPr();indent=props.find(W+'ind')
+            if indent is not None: props.remove(indent)
     table = doc.tables[1]
-    values = {(1,1): data['client'], (1,4): data['project'],
+    while len(table.rows)>8 and all(not c.text.strip() for c in physical_cells(table.rows[-1])):
+        table._tbl.remove(table.rows[-1]._tr)
+    values = {(1,1): data['client'], (1,3): data['project'],
               (2,1): date.fromisoformat(data['request_date']).strftime('%m.%d.%Y'),
               (2,3): date.fromisoformat(data['inspection_date']).strftime('%m.%d.%Y'),
               (2,5): data['requested_by'], (3,1): product(data),
               (4,1): data['permit'], (5,1): data['address'],
-              (6,3): data['drawings_on_site'], (7,3): data['drawings_approved']}
+              (6,1): data['drawings_on_site'], (7,1): data['drawings_approved']}
     for (row, col), value in values.items():
-        replace_cell(table.cell(row, col), value)
-    set_rows(doc.tables[2], 1, [('', a['name'], a['company'], a['title']) for a in data['attendees']])
+        replace_cell(physical_cells(table.rows[row])[col],value)
+    set_rows(doc.tables[2], 1, [(str(i),a['name'],a['company'],a['title']) for i,a in enumerate(data['attendees'],1)])
     site = doc.tables[3]
     # Actual physical cells avoid aliasing merged grid cells.
     rows = [list(row.cells) for row in site.rows]
     loc_index = next(i for i,r in enumerate(rows) if r[0].text.strip() == 'LOCATION/S:')
-    replace_cell(site.cell(loc_index, 1), data['locations'])
+    replace_cell(physical_cells(site.rows[loc_index])[1],data['locations'])
     measures = data['site']
     if data['equipment']=='OT':
         detail=deepcopy(site.rows[loc_index]._tr);site._tbl.append(detail)
         replace_cell(site.rows[-1].cells[0],'Description / scope:')
-        replace_cell(site.rows[-1].cells[1],data.get('site',{}).get('details') or 'Not provided')
+        replace_cell(physical_cells(site.rows[-1])[1],data.get('site',{}).get('details') or 'Not provided')
     elif data['equipment'] == 'SH':
         for col, key in ((1,'length_ft'),(3,'sections'),(5,'height_ft'),(7,'width_ft')):
-            replace_cell(site.cell(loc_index + 1, col), measures[key])
+            replace_cell(physical_cells(site.rows[loc_index+1])[col],measures[key])
     else:
         physical = []
         for cell in site.rows[loc_index+1].cells:
@@ -211,10 +251,10 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
                 physical.append(cell)
         for col,key in ((1,'length_ft'),(3,'height_ft'),(5,'tie_horizontal'),(7,'tie_vertical')):
             replace_cell(physical[col], measures[key])
-        replace_cell(site.cell(loc_index+2, 2), measures['planked_levels'])
-        replace_cell(site.cell(loc_index+2, 7 if variant=='Ois' else 6), measures['outrigger_levels'])
-        replace_cell(site.cell(loc_index+3, 2), measures['tie_type'])
-        replace_cell(site.cell(loc_index+4, 2), measures['dunnage_type'])
+        replace_cell(physical_cells(site.rows[loc_index+2])[1],measures['planked_levels'])
+        replace_cell(physical_cells(site.rows[loc_index+2])[3],measures['outrigger_levels'])
+        replace_cell(physical_cells(site.rows[loc_index+3])[1],measures['tie_type'])
+        replace_cell(physical_cells(site.rows[loc_index+4])[1],measures['dunnage_type'])
         if variant == 'Ois':
             # These example rows are not present in the No OIs master.
             for row in list(site.rows)[loc_index+5:]:
@@ -230,6 +270,9 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         replace_cell(t.rows[0].cells[0],'Section 4 Inspection findings — No open items')
         set_rows(t,2,[('',data['locations'],'No open items were reported in the inspected locations.')])
         doc.tables[5]._element.getparent().remove(doc.tables[5]._element)
+    separate_sections(doc)
+    if reserve_signature:
+        for section in doc.sections: section.bottom_margin=max(section.bottom_margin,Inches(3.0))
     # Copy all original package parts verbatim except the populated main document.
     xml = etree.tostring(doc._element, xml_declaration=True, encoding='UTF-8', standalone=True)
     with ZipFile(source) as original, ZipFile(output, 'w') as result:
@@ -323,7 +366,7 @@ def build(data, directory):
                     'Certification for use is included in the conclusion in the attached PDF.\n'
                     'See attached; please print & keep at the jobsite. It is the responsibility of the '
                     'contractor to ensure these reports are forwarded to all appropriate parties.\n\n')
-            text += 'Regards,\n' + next(a['name'] for a in data['attendees'] if a['title'].strip().upper() == 'PE')
+            text += 'Regards,\n' + next(a['name'] for a in data['attendees'] if is_pe(a['title']))
             msg.set_content(text)
             msg.add_alternative('<html><body>' + ''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in text.split('\n\n')) + '</body></html>', subtype='html')
             msg.add_attachment(pdf.read_bytes(), maintype='application', subtype='pdf', filename=pdf.name)

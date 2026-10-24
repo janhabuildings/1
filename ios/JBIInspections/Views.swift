@@ -3,6 +3,7 @@ import PhotosUI
 import AVFoundation
 import MessageUI
 import UniformTypeIdentifiers
+import ImageIO
 
 struct SharedItems: Identifiable { let id = UUID(); var items: [Any] }
 struct MailAttachment { var data: Data; var filename: String }
@@ -12,6 +13,7 @@ struct InspectionList: View {
     @EnvironmentObject var store: InspectionStore
     @State private var settings = false
     @State private var syncing = false
+    @State private var deleteInspectionID: String?
     var body: some View {
         NavigationStack {
             List {
@@ -26,9 +28,22 @@ struct InspectionList: View {
                             Text("\(inspection.project) · \(inspection.inspection_date)").font(.caption)
                             if store.cache.dirty.contains(inspection.id) { Label("Saved on this phone · not synced", systemImage: "iphone").font(.caption).foregroundStyle(.secondary) }
                         }
+                    }.swipeActions {
+                        Button("Delete", role: .destructive) { deleteInspectionID = inspection.id }
                     }
                 }
             }
+            .confirmationDialog("Delete this inspection and its evidence on all synced devices?", isPresented: Binding(get: { deleteInspectionID != nil }, set: { if !$0 { deleteInspectionID = nil } }), titleVisibility: .visible) {
+                Button("Delete inspection", role: .destructive) {
+                    if let id = deleteInspectionID {
+                        store.removeInspection(id)
+                        Task { do { if store.connected { try await store.flushDeletions() } } catch { store.error = "Deleted locally; server deletion is queued until you reconnect." } }
+                    }
+                    deleteInspectionID = nil
+                }
+            }
+            .task { if store.connected { do { try await store.syncAll() } catch { store.error = "Could not refresh synced inspections: " + error.localizedDescription } } }
+            .refreshable { do { try await store.syncAll() } catch { store.error = error.localizedDescription } }
             .overlay { if store.cache.inspections.isEmpty { ContentUnavailableView("Your inspections", systemImage: "building.2", description: Text("Tap + to begin. Photos and notes are saved on your phone.")) } }
             .navigationTitle("JBI Inspections")
             .navigationDestination(for: String.self) { identity in
@@ -38,8 +53,8 @@ struct InspectionList: View {
                 ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gear") { settings = true } }
                 ToolbarItem(placement: .topBarTrailing) { Button("New inspection", systemImage: "plus") { store.save(Inspection()) } }
                 ToolbarItem(placement: .bottomBar) {
-                    Button(syncing ? "Refreshing…" : "Refresh synced inspections", systemImage: "arrow.clockwise") {
-                        Task { syncing = true; defer { syncing = false }; do { try await store.refresh() } catch { store.error = error.localizedDescription } }
+                    Button(syncing ? "Refreshing…" : "Sync / refresh inspections", systemImage: "arrow.clockwise") {
+                        Task { syncing = true; defer { syncing = false }; do { try await store.syncAll() } catch { store.error = error.localizedDescription } }
                     }.disabled(syncing)
                 }
             }
@@ -59,6 +74,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                StampSettings()
                 Section("Private backend") {
                     TextField("Render backend URL", text: $backendURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Backend API token", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -92,7 +108,7 @@ struct InspectionDetail: View {
     @StateObject private var audio = AudioCapture()
     @Environment(\.scenePhase) private var phase
     @State private var camera = false
-    @State private var photoSelection: PhotosPickerItem?
+    @State private var photoSelection: [PhotosPickerItem] = []
     @State private var importFile = false
     @State private var recordConsent = false
     @State private var aiConsent = false
@@ -107,6 +123,14 @@ struct InspectionDetail: View {
     @State private var mail: MailPayload?
     @State private var showText = false
     @State private var status = ""
+    @State private var autoSyncTask: Task<Void, Never>?
+    @State private var removeMediaID: String?
+    @State private var removeReportType: String?
+    @State private var removeArtifactID: String?
+    @State private var applyStamp = false
+    @State private var stampConsent = false
+    @State private var deleteThisInspection = false
+    @Environment(\.dismiss) private var closeInspection
 
     var body: some View {
         Form {
@@ -150,7 +174,7 @@ struct InspectionDetail: View {
                             if let photo = finding.photo_id {
                                 Text("Photo: \(photo)").font(.caption2)
                                 if let item = store.cache.media.first(where: { $0.id == photo }),
-                                   let image = UIImage(contentsOfFile: store.mediaURL(item).path) {
+                                   let image = evidenceImage(store.mediaURL(item).path) {
                                     Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 160)
                                 }
                             }
@@ -173,16 +197,53 @@ struct InspectionDetail: View {
             if !status.isEmpty { Section { Text(status).font(.caption).textSelection(.enabled) } }
         }
         .navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
-        .onChange(of: inspection) { _, value in store.save(value) }
+        .onChange(of: inspection) { _, value in store.save(value); scheduleSync() }
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
-        .onDisappear { finishRecording(); store.save(inspection) }
-        .onChange(of: photoSelection) { _, item in
+        .onDisappear { finishRecording() }
+        .onChange(of: photoSelection) { _, items in
+            guard !items.isEmpty else { return }
             Task {
-                do {
-                    if let data = try await item?.loadTransferable(type: Data.self), let image = UIImage(data: data) { savePhoto(image) }
-                } catch { store.error = error.localizedDescription }
+                for item in items {
+                    do {
+                        if let data = try await item.loadTransferable(type: Data.self), let image = UIImage(data: data) { savePhoto(image) }
+                    } catch { store.error = error.localizedDescription }
+                }
+                photoSelection = []
             }
         }
+        .task {
+            if store.connected {
+                do { export = try JSONDecoder().decode(ExportResult.self, from: await store.api.request("/inspections/\(inspection.id)/artifacts")) } catch { }
+            }
+        }
+        .confirmationDialog("Delete this inspection and its evidence on all synced devices?", isPresented: $deleteThisInspection, titleVisibility: .visible) {
+            Button("Delete inspection", role: .destructive) {
+                autoSyncTask?.cancel(); store.removeInspection(inspection.id); closeInspection()
+                Task { do { if store.connected { try await store.flushDeletions() } } catch { store.error = "Deleted locally; server deletion queued until reconnect." } }
+            }
+        }
+        .confirmationDialog("Remove this evidence from the inspection?", isPresented: Binding(get: { removeMediaID != nil }, set: { if !$0 { removeMediaID = nil } }), titleVisibility: .visible) {
+            Button("Delete evidence", role: .destructive) {
+                if let id = removeMediaID {
+                    store.removeMedia(id); selectedAIPhotos.remove(id)
+                    for i in inspection.reports.indices { inspection.reports[i].photo_references.removeAll { $0 == id } }
+                    scheduleSync()
+                }
+                removeMediaID = nil
+            }
+        }
+        .confirmationDialog("Remove this report from the inspection?", isPresented: Binding(get: { removeReportType != nil }, set: { if !$0 { removeReportType = nil } }), titleVisibility: .visible) {
+            Button("Remove report", role: .destructive) { inspection.reports.removeAll { $0.equipment == removeReportType }; removeReportType = nil }
+        }
+        .confirmationDialog("Delete this generated file?", isPresented: Binding(get: { removeArtifactID != nil }, set: { if !$0 { removeArtifactID = nil } }), titleVisibility: .visible) {
+            Button("Delete file", role: .destructive) {
+                if let id = removeArtifactID { Task { do { _ = try await store.api.request("/artifacts/\(id)", method: "DELETE"); export?.artifacts.removeAll { $0.id == id } } catch { store.error = error.localizedDescription } } }
+                removeArtifactID = nil
+            }
+        }
+        .confirmationDialog("Apply your saved signature/stamp to No OIs PDFs?", isPresented: $stampConsent, titleVisibility: .visible) {
+            Button("I reviewed the report and authorize this stamp") { generate(stampApproved: true) }
+        } message: { Text("Review the unsigned report first. Your saved image will be placed on page 2 only for No OIs reports, and its engineer name must match an actual PE attendee. This does not create a cryptographic digital signature.") }
         .sheet(isPresented: $camera) { CameraView(captured: savePhoto).ignoresSafeArea() }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments) }
@@ -215,7 +276,7 @@ struct InspectionDetail: View {
                     Task { @MainActor in if granted { camera = true } else { store.error = "Enable camera permission in iPhone Settings." } }
                 }
             }
-            PhotosPicker(selection: $photoSelection, matching: .images) { Label("Import a photo", systemImage: "photo") }
+            PhotosPicker(selection: $photoSelection, maxSelectionCount: 100, matching: .images) { Label("Import photos", systemImage: "photo") }
             Button(audio.recording ? "Stop recording" : "Record on-site conversation", systemImage: audio.recording ? "stop.circle.fill" : "mic") {
                 if audio.recording { finishRecording() } else { recordConsent = true }
             }.foregroundStyle(audio.recording ? Color.red : Color.accentColor)
@@ -225,10 +286,9 @@ struct InspectionDetail: View {
     }
     private var media: some View {
         Section("Photo and audio evidence") {
-            ForEach(store.cache.media.indices.filter { store.cache.media[$0].inspectionID == inspection.id }, id: \.self) { index in
-                let item = store.cache.media[index]
+            ForEach(store.cache.media.filter { $0.inspectionID == inspection.id }) { item in
                 VStack(alignment: .leading, spacing: 8) {
-                    if item.kind == "photo", let image = UIImage(contentsOfFile: store.mediaURL(item).path) {
+                    if item.kind == "photo", let image = evidenceImage(store.mediaURL(item).path) {
                         Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 180)
                         Toggle("Include photo in AI review", isOn: Binding(
                             get: { selectedAIPhotos.contains(item.id) },
@@ -236,10 +296,15 @@ struct InspectionDetail: View {
                                 if value { selectedAIPhotos.insert(item.id) } else { selectedAIPhotos.remove(item.id) }
                             }))
                     } else { Label("Audio recording", systemImage: "waveform") }
-                    Picker("Equipment", selection: $store.cache.media[index].equipment) {
+                    Picker("Equipment", selection: mediaBinding(item.id, \.equipment)) {
                         Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
                     }
-                    TextField("Location / observation", text: $store.cache.media[index].note, axis: .vertical)
+                    TextField("Location / observation", text: mediaBinding(item.id, \.note), axis: .vertical)
+                        .onChange(of: item.note) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
+                        .onChange(of: item.equipment) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
+                    if item.kind == "photo" || item.kind == "audio" {
+                        Button("Delete evidence", role: .destructive) { removeMediaID = item.id }.buttonStyle(.borderless)
+                    }
                     HStack {
                         Button("Share") { share = SharedItems(items: [store.mediaURL(item)]) }.buttonStyle(.borderless)
                         if item.kind == "audio" {
@@ -261,7 +326,10 @@ struct InspectionDetail: View {
     private var reports: some View {
         Section("Report facts — inspector review") {
             ForEach($inspection.reports) { $report in
-                NavigationLink(report.displayName + " report") { ReportEditor(report: $report) }
+                HStack {
+                    NavigationLink(report.displayName + " report") { ReportEditor(report: $report) }
+                    Button("Remove", role: .destructive) { removeReportType = report.equipment }.buttonStyle(.borderless)
+                }
             }
             if !inspection.reports.contains(where: { $0.equipment == "SF" }) { Button("Add scaffold report") { addReport("SF") } }
             if !inspection.reports.contains(where: { $0.equipment == "SH" }) { Button("Add shed report") { addReport("SH") } }
@@ -272,10 +340,14 @@ struct InspectionDetail: View {
         Section("Review and prepare") {
             Button("Sync this inspection", systemImage: "arrow.triangle.2.circlepath") { sync() }.disabled(busy)
             Button("Suggest findings from notes/photos", systemImage: "sparkles") { aiConsent = true }.disabled(busy)
-            Button("Generate review reports", systemImage: "doc.richtext") { generate() }.disabled(busy)
+            if inspection.reports.contains(where: { $0.status == "No OIs" }) {
+                Toggle("Apply saved signature/stamp to No OIs PDF", isOn: $applyStamp)
+            }
+            Button("Generate review reports", systemImage: "doc.richtext") { if applyStamp && inspection.reports.contains(where: { $0.status == "No OIs" }) { stampConsent = true } else { generate() } }.disabled(busy)
             Button("Share notes to WhatsApp or another app", systemImage: "square.and.arrow.up") {
                 share = SharedItems(items: ["\(inspection.project) · \(inspection.inspection_date)\n\(inspection.notes)"])
             }
+            Button("Delete inspection", role: .destructive) { deleteThisInspection = true }.disabled(busy)
             Button("Prepare a text message", systemImage: "message") {
                 if MFMessageComposeViewController.canSendText() { showText = true }
                 else { store.error = "Messages is not configured on this device." }
@@ -290,8 +362,9 @@ struct InspectionDetail: View {
                 VStack(alignment: .leading) {
                     Text(artifact.filename).font(.caption)
                     HStack {
+                        Button("Delete", role: .destructive) { removeArtifactID = artifact.id }.buttonStyle(.borderless)
                         Button("Open / share") {
-                            Task { do { share = SharedItems(items: [try await store.download(artifact)]) } catch { store.error = error.localizedDescription } }
+                            Task { do { share = SharedItems(items: [try await store.download(artifact, inspectionID: inspection.id)]) } catch { store.error = error.localizedDescription } }
                         }.buttonStyle(.borderless)
                         if artifact.mime == "text/html" {
                             Button("Email draft") { compose(artifact, artifacts: result.artifacts) }.buttonStyle(.borderless)
@@ -313,14 +386,14 @@ struct InspectionDetail: View {
     private func savePhoto(_ image: UIImage) {
         do {
             guard let data = image.jpegData(compressionQuality: 0.85) else { throw APIError(message: "Could not encode photo.") }
-            try store.addMedia(data, to: inspection, kind: "photo", mime: "image/jpeg", ext: "jpg")
+            try store.addMedia(data, to: inspection, kind: "photo", mime: "image/jpeg", ext: "jpg"); scheduleSync()
         } catch { store.error = error.localizedDescription }
     }
     private func finishRecording() {
         guard let url = audio.stop() else { return }
         do {
             try store.addMedia(Data(contentsOf: url), to: inspection, kind: "audio", mime: "audio/mp4", ext: "m4a")
-            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url); scheduleSync()
         } catch { store.error = error.localizedDescription }
     }
     private func importMedia(_ result: Result<[URL], Error>) {
@@ -336,11 +409,35 @@ struct InspectionDetail: View {
             } else {
                 let types = ["m4a": "audio/mp4", "wav": "audio/wav", "mp3": "audio/mpeg"]
                 guard let mime = types[ext] else { throw APIError(message: "Import M4A, WAV, MP3 or UTF-8 TXT.") }
-                try store.addMedia(data, to: inspection, kind: "audio", mime: mime, ext: ext)
+                try store.addMedia(data, to: inspection, kind: "audio", mime: mime, ext: ext); scheduleSync()
             }
         } catch { store.error = error.localizedDescription }
     }
+    private func evidenceImage(_ path: String) -> UIImage? {
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 1000, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else { return nil }
+        return UIImage(cgImage: image)
+    }
+    private func mediaBinding(_ id: String, _ key: WritableKeyPath<LocalMedia, String>) -> Binding<String> {
+        Binding(get: { store.cache.media.first(where: { $0.id == id })?[keyPath: key] ?? "" }, set: { value in
+            if let index = store.cache.media.firstIndex(where: { $0.id == id }) { store.cache.media[index][keyPath: key] = value }
+        })
+    }
+    private func scheduleSync() {
+        autoSyncTask?.cancel()
+        guard store.connected else { status = "Saved on this phone. Configure the backend to sync."; return }
+        autoSyncTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, !busy else { return }
+                try await store.sync(inspection)
+                status = "Synced to backend. Use Refresh saved on the website to see updates."
+            } catch is CancellationError { }
+            catch { if !Task.isCancelled { status = "Saved on this phone; sync failed: " + error.localizedDescription } }
+        }
+    }
     private func sync() {
+        autoSyncTask?.cancel()
         Task { busy = true; defer { busy = false }; do { store.save(inspection); try await store.sync(inspection); status = "Inspection and media synced." } catch { store.error = error.localizedDescription } }
     }
     private func extract() {
@@ -410,7 +507,8 @@ struct InspectionDetail: View {
         }
         suggestedFindings.removeAll { $0.id == finding.id }
     }
-    private func generate() {
+    private func generate(stampApproved: Bool = false) {
+        autoSyncTask?.cancel()
         Task {
             busy = true; defer { busy = false }
             do {
@@ -420,7 +518,17 @@ struct InspectionDetail: View {
                     inspection.reports[index].photo_references = Array(Set(inspection.reports[index].photo_references + refs))
                 }
                 store.save(inspection); try await store.sync(inspection)
-                let data = try await store.api.json("/inspections/\(inspection.id)/reports", object: [:])
+                var options: [String: Any] = [:]
+                if stampApproved {
+                    let owner = UserDefaults.standard.string(forKey: "stampOwnerName") ?? ""
+                    guard !owner.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(message: "Enter the stamp engineer name in Settings.") }
+                    let path = store.directory.appendingPathComponent("saved-signature.png")
+                    guard FileManager.default.fileExists(atPath: path.path) else { throw APIError(message: "Choose your signature/stamp image in Settings first.") }
+                    let encoded = owner.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? ""
+                    let stamp = try JSONDecoder().decode(StampAsset.self, from: await store.api.request("/signing-assets?owner=\(encoded)", method: "POST", body: Data(contentsOf: path), mime: "image/png"))
+                    options = ["stamp_id": stamp.id, "stamp_reviewed": true]
+                }
+                let data = try await store.api.json("/inspections/\(inspection.id)/reports", object: options)
                 export = try JSONDecoder().decode(ExportResult.self, from: data)
             } catch { store.error = error.localizedDescription }
         }
@@ -429,11 +537,11 @@ struct InspectionDetail: View {
         guard MFMailComposeViewController.canSendMail() else { store.error = "Configure an account in Apple's Mail app to use the HTML composer. You can still share the generated files."; return }
         Task {
             do {
-                let url = try await store.download(htmlArtifact)
+                let url = try await store.download(htmlArtifact, inspectionID: inspection.id)
                 let html = try String(contentsOf: url, encoding: .utf8)
                 var attachments: [MailAttachment] = []
-                for artifact in artifacts where artifact.equipment == htmlArtifact.equipment && artifact.mime == "application/pdf" {
-                    let file = try await store.download(artifact)
+                for artifact in artifacts where artifact.equipment == htmlArtifact.equipment && artifact.generation_id == htmlArtifact.generation_id && artifact.mime == "application/pdf" {
+                    let file = try await store.download(artifact, inspectionID: inspection.id)
                     let data = try Data(contentsOf: file)
                     guard data.starts(with: Data("%PDF-".utf8)) else { throw APIError(message: "The report attachment is not a valid PDF.") }
                     attachments.append(MailAttachment(data: data, filename: artifact.filename))

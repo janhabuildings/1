@@ -60,6 +60,7 @@ struct LocalMedia: Codable, Equatable, Identifiable {
     var mime: String
 }
 struct Artifact: Codable, Equatable, Identifiable {
+    var generation_id: String?
     var id: String
     var filename: String
     var mime: String
@@ -98,6 +99,9 @@ struct Cache: Codable {
     var inspections: [Inspection] = []
     var media: [LocalMedia] = []
     var dirty: Set<String> = []
+    var pendingInspectionDeletions: Set<String>?
+    var pendingMediaDeletions: Set<String>?
+    var artifactOwners: [String: String]?
 }
 
 struct SuggestedFinding: Decodable, Identifiable {
@@ -131,3 +135,6 @@ struct SuggestedCitation: Decodable, Identifiable {
     var source_pages: [Int]?
     var document: String?
 }
+
+struct DeletionState: Decodable { var inspections: [String]; var media: [String] }
+struct StampAsset: Decodable { var id: String; var owner: String; var sha256: String }

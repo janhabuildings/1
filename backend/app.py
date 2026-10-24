@@ -118,6 +118,8 @@ class TemplateActivationInput(BaseModel):
 
 
 class ExportInput(BaseModel):
+    stamp_id: str | None = None
+    stamp_reviewed: bool = False
     recipients_confirmed: bool = False
     to: list[str] = Field(default_factory=list)
     cc: list[str] = Field(default_factory=list)
@@ -128,6 +130,8 @@ def create_app(settings=None):
     store=Store(settings.data_dir)
     from backend.templates import TemplateManager, sample_report
     templates=TemplateManager(store)
+    from backend import lifecycle,signatures
+    lifecycle.initialize(store);signatures.initialize(store)
     app=FastAPI(title='JBI Inspections',version='0.1.0',docs_url=None,redoc_url=None)
     app.state.store=store
     app.state.settings=settings
@@ -185,7 +189,11 @@ def create_app(settings=None):
         import uuid
         try: uuid.UUID(identity)
         except ValueError: raise HTTPException(422,'Inspection ID must be a UUID')
-        return store.save(dict(json.loads(data.model_dump_json()),id=identity))
+        if identity in lifecycle.deletions(store)['inspections']: raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
+        payload=dict(json.loads(data.model_dump_json()),id=identity)
+        removed=set(lifecycle.deletions(store)['media'])
+        for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
+        return store.save(payload)
 
     @app.post('/calendar/extract',dependencies=[Depends(authorized)])
     async def extract_calendar(request:Request):
@@ -201,6 +209,7 @@ def create_app(settings=None):
     @app.post('/inspections/{identity}/media',status_code=201,dependencies=[Depends(authorized)])
     async def upload(identity:str,request:Request,kind:Literal['photo','audio'],filename:str='attachment',x_asset_id:str | None=Header(default=None)):
         store.get(identity)
+        if x_asset_id and x_asset_id in lifecycle.deletions(store)['media']: raise HTTPException(409,'This evidence was deleted. Refresh before continuing.')
         mime=request.headers.get('content-type','').split(';')[0].strip().lower()
         types={'image/jpeg':('.jpg','photo'),'image/png':('.png','photo'),
                'audio/mp4':('.m4a','audio'),'audio/x-m4a':('.m4a','audio'),'audio/wav':('.wav','audio'),
@@ -359,14 +368,25 @@ def create_app(settings=None):
         output=store.root/'reports'/uid()
         request={'mailbox':{'account':'janhabuildings@gmail.com','to':data.to,'cc':data.cc,
                             'recipients_confirmed':data.recipients_confirmed},'reports':entries}
+        stamp=None
+        if data.stamp_id and any(r['status']=='No OIs' for r in entries):
+            if not data.stamp_reviewed: raise HTTPException(422,'Confirm you reviewed the No OIs report and authorize applying your stored stamp image')
+            try:
+                stamp=signatures.get(store,data.stamp_id);signatures.validate_owner(stamp,entries)
+            except ValueError as error: raise HTTPException(422,str(error))
+        with store.connect() as db:db.execute('INSERT INTO report_runs VALUES (?,?,?)',(output.name,identity,str(output)))
         def work():
             # The explicit Office path is process configuration, not request-controlled input.
             if settings.office_bin:
                 import os
                 os.environ['DSENY_OFFICE_BIN']=settings.office_bin
-            return runner.generate(request,output,templates=selected)
+            return runner.generate(request,output,templates=selected,pdf_postprocess=(lambda pdf,report:signatures.apply(pdf,stamp)) if stamp else None)
         try: manifest=await asyncio.to_thread(work)
         except (ValueError,KeyError,TypeError,IndexError) as error: raise HTTPException(422,str(error))
+        if identity and identity in lifecycle.deletions(store)['inspections']:
+            import shutil
+            if output.is_dir(): shutil.rmtree(output)
+            raise HTTPException(409,'Inspection was deleted during generation; no new files were retained')
         artifacts=[]
         types={'.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                '.pdf':'application/pdf','.html':'text/html','.eml':'message/rfc822'}
@@ -379,13 +399,13 @@ def create_app(settings=None):
                         (artifact,next(iter(selected.values()))['id'],path.name,types[path.suffix],str(path)))
                 else:
                     db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?)',(artifact,identity,path.name,types[path.suffix],str(path)))
-            artifacts.append({'id':artifact,'filename':path.name,'mime':types[path.suffix],'equipment':path.parent.name})
+            artifacts.append({'id':artifact,'filename':path.name,'mime':types[path.suffix],'equipment':path.parent.name,'generation_id':output.name})
         # Server filesystem locations are not public download URLs.
         summaries=[{key:value for key,value in report.items() if key in
-                    ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error','template_version')}
+                    ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error','template_version','visual_stamp')}
                    for report in manifest['reports']]
         return {'reports':summaries,'artifacts':artifacts,'mailbox_drafts_created':False,
-                'notice':'Review rendering and missing facts; no professional signature or seal has been applied.'}
+                'notice':('A visual signature/stamp image was placed on page 2 of No OIs PDFs after your confirmation. This is not a cryptographic digital signature; review before delivery.' if stamp else 'Review rendering and missing facts; no professional signature or seal has been applied.')}
 
     @app.post('/inspections/{identity}/reports',dependencies=[Depends(authorized)])
     async def generate_reports(identity:str,data:ExportInput):
@@ -394,6 +414,44 @@ def create_app(settings=None):
         try: selected=templates.active()
         except ValueError as error: raise HTTPException(409,str(error))
         return await render_reports(inspection['reports'],data,selected,identity)
+
+    @app.get('/sync/deletions',dependencies=[Depends(authorized)])
+    def deleted_records(): return lifecycle.deletions(store)
+
+    @app.delete('/inspections/{identity}',dependencies=[Depends(authorized)])
+    def delete_inspection(identity:str): return lifecycle.delete_inspection(store,identity)
+
+    @app.delete('/media/{identity}',dependencies=[Depends(authorized)])
+    def delete_evidence(identity:str): return lifecycle.delete_media(store,identity)
+
+    @app.get('/inspections/{identity}/artifacts',dependencies=[Depends(authorized)])
+    def saved_artifacts(identity:str): return lifecycle.artifacts(store,identity)
+
+    @app.delete('/artifacts/{identity}',dependencies=[Depends(authorized)])
+    def delete_artifact(identity:str):
+        try:record=store.file(identity,'artifacts');table='artifacts'
+        except KeyError:record=store.file(identity,'template_artifacts');table='template_artifacts'
+        with store.connect() as db:db.execute('DELETE FROM '+table+' WHERE id=?',(identity,))
+        lifecycle.unlink(store,record['path']);return {'deleted':True}
+
+    @app.post('/signing-assets',dependencies=[Depends(authorized)])
+    async def save_stamp(request:Request,owner:str):
+        content=bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content)>4*1024*1024:raise HTTPException(413,'Stamp image limit is 4 MB')
+        try:return signatures.save(store,bytes(content),owner)
+        except ValueError as error:raise HTTPException(422,str(error))
+
+    @app.get('/signing-assets',dependencies=[Depends(authorized)])
+    def stamp_list():
+        with store.connect() as db:return [dict(row) for row in db.execute('SELECT id,owner,sha256 FROM signing_assets')]
+
+    @app.delete('/signing-assets/{identity}',dependencies=[Depends(authorized)])
+    def delete_stamp(identity:str):
+        record=signatures.get(store,identity)
+        with store.connect() as db:db.execute('DELETE FROM signing_assets WHERE id=?',(identity,))
+        lifecycle.unlink(store,record['path']);return {'deleted':True}
 
     @app.get('/templates',dependencies=[Depends(authorized)])
     def template_list():
@@ -411,6 +469,11 @@ def create_app(settings=None):
             if len(content)>10*1024*1024: raise HTTPException(413,'DOCX upload limit is 10 MB')
         try: return templates.add(bytes(content),slot,label.strip(),mode,{})
         except ValueError as error: raise HTTPException(422,str(error))
+
+    @app.delete('/templates/{identity}',dependencies=[Depends(authorized)])
+    def template_archive(identity:str):
+        try:return templates.archive(identity)
+        except ValueError as error:raise HTTPException(409,str(error))
 
     @app.get('/templates/{identity}/download',dependencies=[Depends(authorized)])
     def template_download(identity:str):

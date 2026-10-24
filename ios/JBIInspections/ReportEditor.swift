@@ -56,7 +56,8 @@ struct ReportEditor: View {
                     VStack {
                         TextField("Name", text: $attendee.name)
                         TextField("Company / agency", text: $attendee.company)
-                        TextField("Role · use PE for inspecting engineer", text: $attendee.title)
+                        TextField("Role · PE or P.E. for inspecting engineer", text: $attendee.title)
+                        Button("Remove attendee", role: .destructive) { report.attendees.removeAll { $0.id == attendee.id } }.buttonStyle(.borderless)
                     }
                 }.onDelete { report.attendees.remove(atOffsets: $0) }
                 Button("Add attendee") { report.attendees.append(Attendee()) }
@@ -74,6 +75,7 @@ struct ReportEditor: View {
                     VStack {
                         TextField("Location / occurrence", text: $finding.location, axis: .vertical)
                         TextField("Required corrective action", text: $finding.action, axis: .vertical)
+                        Button("Remove open item", role: .destructive) { report.open_items.removeAll { $0.id == finding.id } }.buttonStyle(.borderless)
                     }
                 }.onDelete { report.open_items.remove(atOffsets: $0) }
                 Button("Add open item") { report.open_items.append(Finding()) }

@@ -90,6 +90,7 @@ class TemplateManager:
                 id TEXT PRIMARY KEY,slot TEXT NOT NULL,label TEXT NOT NULL,mode TEXT NOT NULL,
                 mapping TEXT NOT NULL,sha256 TEXT NOT NULL,created_at TEXT NOT NULL,builtin INTEGER NOT NULL DEFAULT 0,
                 previewed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS template_archives(id TEXT PRIMARY KEY REFERENCES template_versions(id));
             CREATE TABLE IF NOT EXISTS template_artifacts(id TEXT PRIMARY KEY,template_id TEXT NOT NULL REFERENCES template_versions(id),
                 filename TEXT NOT NULL,mime TEXT NOT NULL,path TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS template_active(slot TEXT PRIMARY KEY,version_id TEXT NOT NULL REFERENCES template_versions(id));
@@ -131,7 +132,7 @@ class TemplateManager:
 
     def list(self):
         with self.store.connect() as db:
-            ids=[r['id'] for r in db.execute('SELECT id FROM template_versions ORDER BY created_at DESC')]
+            ids=[r['id'] for r in db.execute('SELECT id FROM template_versions WHERE id NOT IN (SELECT id FROM template_archives) ORDER BY created_at DESC')]
             active={r['slot']:r['version_id'] for r in db.execute('SELECT * FROM template_active')}
         return {'active':active,'versions':[self.public(self.get(i)) for i in ids],
                 'fields':list(TEMPLATE_FIELDS),'slots':list(SLOTS),
@@ -150,12 +151,21 @@ class TemplateManager:
         with self.store.connect() as db: pointers=list(db.execute('SELECT * FROM template_active'))
         return {r['slot']:self.get(r['version_id']) for r in pointers}
 
+    def archive(self,identity):
+        record=self.get(identity)
+        with self.store.connect() as db:
+            if record['builtin'] or db.execute('SELECT 1 FROM template_active WHERE version_id=?',(identity,)).fetchone():
+                raise ValueError('Original and active templates cannot be archived; choose another active version first')
+            db.execute('INSERT OR IGNORE INTO template_archives VALUES (?)',(identity,))
+        return {'archived':True,'notice':'Hidden from the list; source and version metadata remain for report history.'}
+
     def activate(self,identity,reviewed):
         record=self.get(identity);info=self.public(record)
         if not reviewed: raise ValueError('Confirm that you reviewed the sample formatting and facts')
         if not info['valid']: raise ValueError('; '.join(info['errors']))
         if not record['previewed']: raise ValueError('Generate a successful sample for this exact template and mapping version first')
         with self.store.connect() as db:
+            db.execute('DELETE FROM template_archives WHERE id=?',(identity,))
             db.execute('UPDATE template_active SET version_id=? WHERE slot=?',(identity,record['slot']))
         return {'active_version':identity,'slot':record['slot']}
 
