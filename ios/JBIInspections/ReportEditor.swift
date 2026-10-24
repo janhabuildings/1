@@ -3,7 +3,7 @@ import SwiftUI
 struct ReportEditor: View {
     @Binding var report: ReportDraft
     private var siteFields: [(String, String)] {
-        report.equipment == "SH" ? [("length_ft", "Approx. length (ft)"), ("sections", "Individual sections"),
+        report.equipment == "OT" ? [] : report.equipment == "SH" ? [("length_ft", "Approx. length (ft)"), ("sections", "Individual sections"),
             ("height_ft", "Max height (ft)"), ("width_ft", "Max width (ft)")] :
             [("length_ft", "Approx. length (ft)"), ("height_ft", "Max height (ft)"),
              ("tie_horizontal", "Horizontal tie spacing"), ("tie_vertical", "Vertical tie spacing"),
@@ -20,6 +20,19 @@ struct ReportEditor: View {
                 }
                 if report.status == "No OIs" && !report.open_items.isEmpty {
                     Text("Remove or resolve the recorded findings before confirming No OIs. The server will reject conflicting results.").foregroundStyle(.red)
+                }
+            }
+            if report.equipment == "OT" {
+                Section("Other inspected item") {
+                    Picker("Inspection type", selection: siteBinding("report_type", defaultValue: "Unknown / custom")) {
+                        Text("SOE (Support of Excavation)").tag("SOE")
+                        Text("Fall Protection").tag("Fall Protection")
+                        Text("Fence").tag("Fence")
+                        Text("Unknown / custom item").tag("Unknown / custom")
+                    }
+                    TextField("Item name (for unknown / custom)", text: siteBinding("other_name"))
+                    TextField("Description / inspection scope", text: siteBinding("details"), axis: .vertical)
+                    Text("Choose Unknown / custom while collecting evidence. Enter the item name when writing the report.").font(.caption)
                 }
             }
             Section("Project and request") {
@@ -49,11 +62,12 @@ struct ReportEditor: View {
                 Button("Add attendee") { report.attendees.append(Attendee()) }
                 Text("Template names are not proof of attendance. Identify the inspecting PE.").font(.caption)
             }
-            Section("Equipment dimensions and details") {
+            if report.equipment != "OT" { Section("Equipment dimensions and details") {
                 ForEach(siteFields, id: \.0) { key, label in
                     TextField(label, text: Binding(get: { report.site[key] ?? "" }, set: { report.site[key] = $0 }))
                 }
                 Text("Use NA only when you confirm it is not applicable. Unanswered values stay pending.").font(.caption)
+            }
             }
             Section("Open items") {
                 ForEach($report.open_items) { $finding in
@@ -65,7 +79,10 @@ struct ReportEditor: View {
                 Button("Add open item") { report.open_items.append(Finding()) }
                 Text("Swipe to remove a finding. No OIs is never inferred from an empty list.").font(.caption)
             }
-        }.navigationTitle(report.equipment == "SH" ? "Shed facts" : "Scaffold facts")
+        }.navigationTitle(report.displayName + " facts")
+    }
+    private func siteBinding(_ key: String, defaultValue: String = "") -> Binding<String> {
+        Binding(get: { report.site[key] ?? defaultValue }, set: { report.site[key] = $0 })
     }
     private func drawingPicker(_ label: String, selection: Binding<String>) -> some View {
         Picker(label, selection: selection) {

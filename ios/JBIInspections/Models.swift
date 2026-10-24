@@ -14,6 +14,7 @@ struct Finding: Codable, Equatable, Identifiable {
 struct ReportDraft: Codable, Equatable, Identifiable {
     var id: String { equipment }
     var equipment: String
+    var displayName: String { equipment == "SF" ? "Scaffold" : equipment == "SH" ? "Shed" : "Other" }
     var status = ""
     var client = ""
     var project = ""

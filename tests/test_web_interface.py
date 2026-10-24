@@ -116,6 +116,25 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#code-results')).to_contain_text('2025')
         self.assertEqual(self.errors,[])
         self.assertEqual(self.page.evaluate('localStorage.length'),0)
+    def test_other_unknown_name_is_saved_without_scaffold_dimensions(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('#add-OT').click()
+        card=self.page.locator('.report-card')
+        expect(card.get_by_role('heading',name='Other',exact=True)).to_be_visible()
+        expect(card.get_by_label('Item name (for unknown / custom)',exact=True)).to_be_visible()
+        card.get_by_label('Item name (for unknown / custom)',exact=True).fill('Temporary debris screen')
+        card.get_by_label('Description / inspection scope',exact=True).fill('North elevation')
+        expect(card.get_by_label('Horizontal tie spacing',exact=True)).to_have_count(0)
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        record=self.app.state.store.list()[0]['reports'][0]
+        self.assertEqual(record['equipment'],'OT')
+        self.assertEqual(record['site']['other_name'],'Temporary debris screen')
+        self.assertEqual(record['site']['details'],'North elevation')
+        self.assertEqual(self.errors,[])
+
     def test_template_upload_mapping_preview_and_activation(self):
         from playwright.sync_api import expect
         from tests.test_templates import placeholder_doc

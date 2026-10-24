@@ -154,8 +154,8 @@ struct InspectionDetail: View {
                                     Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 160)
                                 }
                             }
-                            if ["SF", "SH"].contains(finding.equipment) {
-                                Button("Confirm and add as \(finding.equipment == "SF" ? "scaffold" : "shed") open item") {
+                            if ["SF", "SH", "OT"].contains(finding.equipment) {
+                                Button("Confirm and add as \(finding.equipment == "SF" ? "scaffold" : finding.equipment == "SH" ? "shed" : "Other") open item") {
                                     adopt(finding)
                                 }
                             } else { Text("Equipment is unclear; add this manually after clarification.").font(.caption) }
@@ -237,7 +237,7 @@ struct InspectionDetail: View {
                             }))
                     } else { Label("Audio recording", systemImage: "waveform") }
                     Picker("Equipment", selection: $store.cache.media[index].equipment) {
-                        Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH")
+                        Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
                     }
                     TextField("Location / observation", text: $store.cache.media[index].note, axis: .vertical)
                     HStack {
@@ -261,10 +261,11 @@ struct InspectionDetail: View {
     private var reports: some View {
         Section("Report facts — inspector review") {
             ForEach($inspection.reports) { $report in
-                NavigationLink(report.equipment == "SF" ? "Scaffold report" : "Shed report") { ReportEditor(report: $report) }
+                NavigationLink(report.displayName + " report") { ReportEditor(report: $report) }
             }
             if !inspection.reports.contains(where: { $0.equipment == "SF" }) { Button("Add scaffold report") { addReport("SF") } }
             if !inspection.reports.contains(where: { $0.equipment == "SH" }) { Button("Add shed report") { addReport("SH") } }
+            if !inspection.reports.contains(where: { $0.equipment == "OT" }) { Button("Add Other report") { addReport("OT") } }
         }
     }
     private var actions: some View {

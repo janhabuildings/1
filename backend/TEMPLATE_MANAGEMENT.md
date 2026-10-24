@@ -4,7 +4,7 @@ Open the backend web workspace on your computer or phone, sign in with the exist
 
 ## Revise and activate
 
-1. Choose Scaffold/Shed and Open items/No open items. Each of these four report types has its own active template.
+1. Choose Scaffold/Shed/Other and Open items/No open items. Each of these six report types has its own active template.
 2. Download the original or an earlier version for editing in Word. Keep its backup settings as well.
 3. Select **Existing DSENY tables** for revisions that retain the original table structure (fonts, colors, borders, text and spacing). Positional mappings remain the same. Moving/adding structural rows or tables requires a generator mapping change or a custom placeholder template.
 4. For a redesigned layout, select **Custom layout using placeholders** and put stable markers in Word paragraphs or table cells. For example `{{project}}`, `{{inspection_date}}`, `{{site.height_ft}}`. The screen lists every supported field. `{{school_name}}` can be mapped to `project` through its field dropdown.
@@ -30,7 +30,7 @@ Uploads are bounded to 10 MB compressed / 40 MB expanded. Macros, embedded execu
 All endpoints require the backend bearer token:
 
 - `GET /templates`: active pointers, immutable version metadata, placeholders, mapping errors and field catalog.
-- `POST /templates?slot=SF-OIs&mode=placeholders&label=Revision&filename=template.docx`: raw DOCX body. Slots also include `SF-No OIs`, `SH-OIs`, `SH-No OIs`.
+- `POST /templates?slot=SF-OIs&mode=placeholders&label=Revision&filename=template.docx`: raw DOCX body. Slots also include `SF-No OIs`, `SH-OIs`, `SH-No OIs`, `OT-OIs`, `OT-No OIs`. Other legacy templates use the Full master with its general Section 3 Location and Section 4 Open Items areas.
 - `GET /templates/{id}/download` and `/metadata`: backup originals and settings.
 - `POST /templates/{id}/mapping` with `{"mapping":{"school_name":"project"}}`: create another immutable version.
 - `POST /templates/{id}/preview`: generate synthetic sample artifacts; no active version is changed.

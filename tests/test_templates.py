@@ -99,7 +99,7 @@ class TemplateAPI(unittest.TestCase):
         self.assertEqual(self.client.get('/templates').status_code,401)
         self.assertEqual(self.client.post('/templates?slot=SF-OIs',content=placeholder_doc()).status_code,401)
         versions=self.client.get('/templates',headers=HEADERS).json()
-        self.assertEqual(len(versions['versions']),4)
+        self.assertEqual(len(versions['versions']),6)
         self.assertEqual(self.client.get('/inspections',headers=HEADERS).json(),[])
         response=self.upload();self.assertEqual(response.status_code,201,response.text)
         old=response.json()['id']

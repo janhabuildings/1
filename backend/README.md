@@ -119,3 +119,9 @@ Tests use controlled AI responses and real stored vectors to exercise retrieval,
 ### Report template management
 
 The authenticated web workspace now includes **Templates**: versioned DOCX uploads, stable placeholder/alias mapping, real sample exports, reviewed activation and rollback for all four SF/SH outcomes. Existing iPhone builds use activated versions on their next report generation without reinstalling. See [Template management](TEMPLATE_MANAGEMENT.md) for the field contract, endpoints, backup/restore instructions and current Render Free storage limits.
+
+### Other reports
+
+Inspection report facts now support `OT` alongside `SF` and `SH` (one report of each kind per inspection). Other uses `site.report_type`: SOE, Fall Protection, Fence or `Unknown / custom`. For unknown/custom items, enter the eventual name in `site.other_name`; optional scope goes in `site.details`. Drafts retain a pending marker if the name is missing. No scaffold/shed dimensions are required for Other. Photos may be labeled OT, and reviewed AI suggestions can be adopted as Other open items.
+
+The existing Full DOCX master supplies only its general Location and Open Items sections, preserving its original formatting/package parts. Instructions, example deficiencies, scaffold/shed-specific sections and alternative conclusion text are excluded. Other No OIs reports use neutral unsigned-review wording rather than asserting structural approval or certification for use. OIs remains HTML email; No OIs remains DOCX/PDF plus cover draft. The user must explicitly select the outcome.

@@ -11,7 +11,7 @@ from docx import Document
 from report_agent import TEMPLATE_FIELDS,TOKEN,NS
 from backend.core import uid
 
-SLOTS=('SF-OIs','SF-No OIs','SH-OIs','SH-No OIs')
+SLOTS=('SF-OIs','SF-No OIs','SH-OIs','SH-No OIs','OT-OIs','OT-No OIs')
 ROOT=Path(__file__).resolve().parents[1]
 
 
@@ -57,7 +57,11 @@ def inspect(content,mode,mapping,slot,*,builtin=False):
         try:
             doc=Document(BytesIO(content))
             # Exercise the positional mapping before accepting layout-compatible revisions.
-            if len(doc.tables)!=(6 if slot.endswith('-OIs') else 4): raise ValueError()
+            if len(doc.tables)!=(6 if slot.startswith('OT') or slot.endswith('-OIs') else 4): raise ValueError()
+            if slot.startswith('OT'):
+                site_headings=[' '.join(r.cells[0].text.split()) for r in doc.tables[3].rows]
+                item_headings=[' '.join(r.cells[0].text.split()) for r in doc.tables[4].rows]
+                if 'Section 3 Location' not in site_headings or 'Section 4 Open Items' not in item_headings: raise ValueError()
             site_rows=len(doc.tables[3].rows)
             if slot.startswith('SF') and site_rows<6: raise ValueError()
             if slot.startswith('SH') and site_rows!=3: raise ValueError()
@@ -92,7 +96,7 @@ class TemplateManager:
             ''')
         for slot in SLOTS:
             variant='N-Ois' if slot.endswith('-No OIs') else 'Ois'
-            source=ROOT/'templates'/f'New Template {slot[:2]}-{variant}.docx'
+            source=ROOT/'templates'/('New Template Full.docx' if slot.startswith('OT') else f'New Template {slot[:2]}-{variant}.docx')
             identity='builtin-'+slot
             with store.connect() as db:
                 exists=db.execute('SELECT id FROM template_versions WHERE id=?',(identity,)).fetchone()
@@ -164,6 +168,6 @@ def sample_report(slot):
         'inspection_code':'I','drawings_on_site':'Yes','drawings_approved':'Yes',
         'attendees':[{'name':'SAMPLE INSPECTOR (not actual attendance)','company':'Sample company','title':'PE'}],
         'open_items':[{'location':'Sample platform edge','action':'Sample corrective action — not an actual finding'}] if status=='OIs' else [],
-        'site':{k:'10' for k in ('length_ft','height_ft','sections','width_ft','tie_horizontal','tie_vertical',
-            'planked_levels','outrigger_levels','tie_type','dunnage_type')},
+        'site':dict(report_type='Unknown / custom',other_name='SAMPLE OTHER ITEM',details='Sample inspection scope',**{k:'10' for k in ('length_ft','height_ft','sections','width_ft','tie_horizontal','tie_vertical',
+            'planked_levels','outrigger_levels','tie_type','dunnage_type')}),
         'source_references':['SAMPLE ONLY — review formatting, not a certified inspection'], 'photo_references':[]}

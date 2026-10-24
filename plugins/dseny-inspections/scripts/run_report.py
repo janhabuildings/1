@@ -52,7 +52,12 @@ def prepare(data):
     if not any(a['title'].strip().upper() == 'PE' for a in data['attendees']):
         data['attendees'].append({'name': PENDING, 'company':'DSENY Engineering Services PC','title':'PE'})
         missing.append('inspecting_pe')
-    for key in SH_FIELDS if data.get('equipment') == 'SH' else SF_FIELDS:
+    if data.get('equipment')=='OT':
+        site=data.setdefault('site',{})
+        site.setdefault('report_type','Unknown / custom')
+        if site['report_type'] in ('','Unknown / custom','Other','Unknown') and not site.get('other_name'):
+            site['other_name']=PENDING;missing.append('site.other_name')
+    for key in (() if data.get('equipment')=='OT' else SH_FIELDS if data.get('equipment') == 'SH' else SF_FIELDS):
         data.setdefault('site', {})
         if not data['site'].get(key):
             data['site'][key] = PENDING
@@ -204,6 +209,8 @@ def generate(request, output, renderer='libreoffice', templates=None):
                       'See attached; please print & keep at the jobsite. It is the responsibility of the contractor '
                       'to ensure these reports are forwarded to all appropriate parties.\n\nRegards,\n'+
                       next(a['name'] for a in data['attendees'] if a['title'].strip().upper()=='PE'))
+                if data['equipment']=='OT':
+                    body='Dear Client,\n\nPlease see the attached unsigned inspection review draft for '+reports.product(data)+'. No open items were reported for the inspected locations. Review scope and findings before delivery.\n\nRegards,\n'+next(a['name'] for a in data['attendees'] if a['title'].strip().upper()=='PE')
                 content='<html><body>'+''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in body.split('\n\n'))+'</body></html>'
                 html_file=folder/(safe+' - Cover.html');html_file.write_text(content)
                 entry['html_file']=str(html_file)

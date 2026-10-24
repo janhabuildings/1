@@ -29,8 +29,8 @@ def require(value, name):
 
 
 def validate(data, *, draft=False):
-    if data.get('equipment') not in ('SF', 'SH'):
-        raise ValueError('equipment must be SF or SH')
+    if data.get('equipment') not in ('SF', 'SH', 'OT'):
+        raise ValueError('equipment must be SF, SH or OT')
     if data.get('status') not in ('OIs', 'No OIs'):
         raise ValueError('status must be OIs or No OIs; do not infer from missing findings')
     for name in ('client', 'project', 'requested_by', 'permit', 'address', 'locations', 'inspection_code'):
@@ -58,7 +58,8 @@ def validate(data, *, draft=False):
     for item in items:
         for name in ('location', 'action'):
             require(item.get(name), 'open_item.' + name)
-    fields = ('length_ft', 'height_ft', 'sections', 'width_ft') if data['equipment'] == 'SH' else (
+    if data['equipment']=='OT': require(product(data),'Other item name')
+    fields = () if data['equipment']=='OT' else ('length_ft', 'height_ft', 'sections', 'width_ft') if data['equipment'] == 'SH' else (
         'length_ft', 'height_ft', 'tie_horizontal', 'tie_vertical', 'planked_levels',
         'outrigger_levels', 'tie_type', 'dunnage_type')
     for name in fields:
@@ -109,7 +110,7 @@ TEMPLATE_FIELDS = tuple(('client project subject_project requested_by permit add
     'request_date inspection_date drawings_on_site drawings_approved product status attendees open_items '
     'source_references photo_references').split()) + tuple('site.'+k for k in (
     'length_ft','height_ft','sections','width_ft','tie_horizontal','tie_vertical',
-    'planked_levels','outrigger_levels','tie_type','dunnage_type'))
+    'planked_levels','outrigger_levels','tie_type','dunnage_type','report_type','other_name','details'))
 TOKEN = re.compile(r'\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}')
 
 
@@ -173,12 +174,13 @@ def fill_placeholders(data, output, source, mapping):
 def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None):
     validate(data, draft=draft)
     variant = 'Ois' if data['status'] == 'OIs' else 'N-Ois'
-    source = ROOT / 'templates' / f'New Template {data["equipment"]}-{variant}.docx'
+    source = ROOT / 'templates' / ('New Template Full.docx' if data['equipment']=='OT' else f'New Template {data["equipment"]}-{variant}.docx')
     if template is not None: source=Path(template)
     if template_mode == "placeholders":
         return fill_placeholders(data,output,source,mapping or {})
     if template_mode != "legacy": raise ValueError("Unsupported template mode")
     doc = Document(source)
+    if data['equipment']=='OT': prepare_other_layout(doc,data)
     table = doc.tables[1]
     values = {(1,1): data['client'], (1,4): data['project'],
               (2,1): date.fromisoformat(data['request_date']).strftime('%m.%d.%Y'),
@@ -195,7 +197,11 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
     loc_index = next(i for i,r in enumerate(rows) if r[0].text.strip() == 'LOCATION/S:')
     replace_cell(site.cell(loc_index, 1), data['locations'])
     measures = data['site']
-    if data['equipment'] == 'SH':
+    if data['equipment']=='OT':
+        detail=deepcopy(site.rows[loc_index]._tr);site._tbl.append(detail)
+        replace_cell(site.rows[-1].cells[0],'Description / scope:')
+        replace_cell(site.rows[-1].cells[1],data.get('site',{}).get('details') or 'Not provided')
+    elif data['equipment'] == 'SH':
         for col, key in ((1,'length_ft'),(3,'sections'),(5,'height_ft'),(7,'width_ft')):
             replace_cell(site.cell(loc_index + 1, col), measures[key])
     else:
@@ -219,6 +225,11 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         set_rows(t, start, [(str(i), item['location'], item['action']) for i,item in enumerate(data['open_items'],1)])
         for row in doc.tables[5].rows:
             replace_cell(row.cells[1], '')
+    elif data['equipment']=='OT':
+        t=doc.tables[4]
+        replace_cell(t.rows[0].cells[0],'Section 4 Inspection findings — No open items')
+        set_rows(t,2,[('',data['locations'],'No open items were reported in the inspected locations.')])
+        doc.tables[5]._element.getparent().remove(doc.tables[5]._element)
     # Copy all original package parts verbatim except the populated main document.
     xml = etree.tostring(doc._element, xml_declaration=True, encoding='UTF-8', standalone=True)
     with ZipFile(source) as original, ZipFile(output, 'w') as result:
@@ -227,7 +238,29 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
     return source
 
 
+def prepare_other_layout(doc,data):
+    # Use only the Full master's general sections, never its instruction text or example deficiencies.
+    site=doc.tables[3];rows=list(site.rows)
+    start=next(i for i,r in enumerate(rows) if ' '.join(r.cells[0].text.split())=='Section 3 Location')
+    for row in rows:
+        if row not in rows[start:start+2]: site._tbl.remove(row._tr)
+    findings=doc.tables[4];rows=list(findings.rows)
+    start=next(i for i,r in enumerate(rows) if ' '.join(r.cells[0].text.split())=='Section 4 Open Items')
+    for row in rows[:start]: findings._tbl.remove(row._tr)
+    body=doc._element.body;children=list(body)
+    first=children.index(doc.tables[0]._element);second=children.index(doc.tables[1]._element)
+    for index,child in enumerate(children):
+        if child.tag!=W+'p': continue
+        text=''.join(child.itertext()).strip()
+        keep=first<index<second or (data['status']=='OIs' and any(marker in text for marker in (
+            'Section 5, Client certification','Upon completion of corrected open items','I have personally and visually inspected')))
+        if not keep: body.remove(child)
+
+
 def product(data):
+    if data['equipment']=='OT':
+        site=data.get('site',{});kind=site.get('report_type','Unknown / custom')
+        return require(site.get('other_name') if kind in ('','Unknown / custom','Other','Unknown') else kind,'Other item name')
     return 'Supported Scaffold' if data['equipment'] == 'SF' else 'Sidewalk Shed'
 
 
