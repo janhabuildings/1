@@ -194,6 +194,10 @@ class WebWorkflow(unittest.TestCase):
         dunnage=self.page.get_by_label('Dunnage type',exact=True)
         self.assertEqual(tie.input_value(), '')
         self.assertEqual(dunnage.input_value(), '')
+        self.page.get_by_label('Hoist inspected?',exact=True).select_option('Yes')
+        self.page.get_by_label('Hoist location(s)',exact=True).fill('North courtyard')
+        self.page.get_by_label('Hoist height (ft)',exact=True).fill('48')
+        self.page.get_by_label('Hoist model',exact=True).fill('Example model')
         tie.select_option('Concrete Wall Anchor')
         dunnage.select_option('__custom__')
         self.page.get_by_label('Dunnage type · custom description',exact=True).fill('Timber pads on sleepers')
@@ -201,6 +205,10 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         record=self.app.state.store.list()[0]
         saved=self.app.state.store.get(record['id'])
+        self.assertEqual(saved['reports'][0]['site']['hoist_inspected'], 'Yes')
+        self.assertEqual(saved['reports'][0]['site']['hoist_locations'], 'North courtyard')
+        self.assertEqual(saved['reports'][0]['site']['hoist_height'], '48')
+        self.assertEqual(saved['reports'][0]['site']['hoist_model'], 'Example model')
         self.assertEqual(saved['reports'][0]['site']['tie_type'], 'Concrete Wall Anchor')
         self.assertEqual(saved['reports'][0]['site']['dunnage_type'], 'Timber pads on sleepers')
         self.page.locator('#add-SH').click()  # Re-render must preserve custom values.

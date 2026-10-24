@@ -62,6 +62,16 @@ def prepare(data):
         if not data['site'].get(key):
             data['site'][key] = PENDING
             missing.append('site.'+key)
+    if data.get('equipment')=='SF':
+        site=data.setdefault('site',{})
+        for kind in ('hoist','chute'):
+            flag=kind+'_inspected'
+            if not site.get(flag): site[flag]=PENDING;missing.append('site.'+flag)
+            for suffix in ('locations','height','model'):
+                key=kind+'_'+suffix
+                if not site.get(key):
+                    site[key]='NA' if site[flag] in ('No','NA') else PENDING
+                    if site[key]==PENDING:missing.append('site.'+key)
     # Caller-supplied pending placeholders must also be reported.
     def visit(value, path=''):
         if isinstance(value,dict):

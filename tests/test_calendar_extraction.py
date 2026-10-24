@@ -91,3 +91,16 @@ Section 3 Scaffold Specific Location
         self.assertNotIn('status',value['equipment'][0])
         self.assertFalse(value['confirmed'])
         self.assertEqual(calendar_candidates('No subject supplied')['titles'], [])
+
+    def test_flattened_calendar_row_and_project_from_subject(self):
+        fields=calendar_candidates('Client: AEC Project: IS561K\nRequest date: 05.05.2026 Inspected on: 10.24.2026 Request by: Example Person\nSite Address: 400 Empire Boulevard')['fields']
+        self.assertEqual(fields['project'],'IS561K')
+        self.assertEqual(fields['client'],'AEC')
+        self.assertEqual(fields['requested_by'],'Example Person')
+        self.assertEqual(fields['address'],'400 Empire Boulevard')
+        self.assertEqual(calendar_candidates('2026-10-24 IS561K Sidewalk Shed-I-Inspection-No OIs')['fields']['project'],'IS561K')
+        mixed=calendar_candidates('2026-10-24 ONE Sidewalk Shed-I-Inspection-OIs\n2026-10-24 TWO Supported Scaffold-I-Inspection-OIs')
+        self.assertNotIn('project',mixed['fields'])
+        self.assertEqual(calendar_candidates('2026-10-24 IS561K Fall Protection-I-Inspection-OIs')['fields']['project'],'IS561K')
+        same_kind=calendar_candidates('2026-10-24 ONE Supported Scaffold-I-Inspection-OIs\n2026-10-24 TWO Supported Scaffold-I-Inspection-No OIs')
+        self.assertNotIn('project',same_kind['fields'])

@@ -118,6 +118,7 @@ class TemplateActivationInput(BaseModel):
 
 
 class ExportInput(BaseModel):
+    mailbox_email: str = Field(default='',max_length=254)
     stamp_id: str | None = None
     stamp_reviewed: bool = False
     recipients_confirmed: bool = False
@@ -376,7 +377,7 @@ def create_app(settings=None):
         spec=importlib.util.spec_from_file_location('jbi_plugin_runner',runner_path)
         runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
         output=store.root/'reports'/uid()
-        request={'mailbox':{'account':'janhabuildings@gmail.com','to':data.to,'cc':data.cc,
+        request={'mailbox':{'account':data.mailbox_email.strip() or 'janhabuildings@gmail.com','to':data.to,'cc':data.cc,
                             'recipients_confirmed':data.recipients_confirmed},'reports':entries}
         stamp=None
         if data.stamp_id and any(r['status']=='No OIs' for r in entries):

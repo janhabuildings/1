@@ -35,6 +35,11 @@ class Reports(unittest.TestCase):
                             if name!='word/document.xml': self.assertEqual(a.read(name),b.read(name),name)
                         original=Document(master)
                         self.assertEqual(original.tables[1].cell(2,3)._tc.tcPr.xml,doc.tables[1].cell(2,3)._tc.tcPr.xml)
+                        if status=='No OIs':
+                            self.assertEqual(doc.sections[0].top_margin.inches,0.5)
+                            self.assertEqual(doc.sections[0].bottom_margin.inches,0.5)
+                            original.sections[0].top_margin=doc.sections[0].top_margin
+                            original.sections[0].bottom_margin=doc.sections[0].bottom_margin
                         self.assertEqual(original.sections[0]._sectPr.xml,doc.sections[0]._sectPr.xml)
     def test_reject_unsafe_or_incomplete_inputs(self):
         for change in ({'status':'No OIs'}, {'open_items':[]}, {'recipients_confirmed':False},

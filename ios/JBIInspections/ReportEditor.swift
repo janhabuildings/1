@@ -77,6 +77,18 @@ struct ReportEditor: View {
                 Text("Use NA only when you confirm it is not applicable. Unanswered values stay pending.").font(.caption)
             }
             }
+            if report.equipment == "SF" {
+                Section("Hoist and chute") {
+                    drawingPicker("Hoist inspected?", selection: siteBinding("hoist_inspected"))
+                    TextField("Hoist location(s)", text: siteBinding("hoist_locations"))
+                    TextField("Height of hoist (ft)", text: siteBinding("hoist_height"))
+                    TextField("Hoist model", text: siteBinding("hoist_model"))
+                    drawingPicker("Chute inspected?", selection: siteBinding("chute_inspected"))
+                    TextField("Chute location(s)", text: siteBinding("chute_locations"))
+                    TextField("Height of chute (ft)", text: siteBinding("chute_height"))
+                    TextField("Chute model", text: siteBinding("chute_model"))
+                }
+            }
             Section("Open items") {
                 ForEach($report.open_items) { $finding in
                     VStack {

@@ -55,6 +55,17 @@ class CellMapping(unittest.TestCase):
                         self.assertEqual(cells(site.rows[location+2])[2].text,'Planked Outrigger Levels')
                         self.assertEqual(cells(site.rows[location+2])[3].text,'10')
 
+    def test_scaffold_hoist_chute_fields_are_retained_in_both_variants(self):
+        for status in ('OIs','No OIs'):
+            data=sample_report('SF-'+status)
+            data['site'].update(hoist_inspected='Yes',chute_inspected='Yes',hoist_locations='North courtyard',hoist_height='48',hoist_model='Example Hoist',chute_locations='East bay',chute_height='36',chute_model='Example Chute')
+            with tempfile.TemporaryDirectory() as directory:
+                path=Path(directory)/'report.docx';report_agent.fill_report(data,path,draft=True)
+                table=Document(path).tables[3]
+                text=' '.join(c.text for row in table.rows for c in report_agent.physical_cells(row))
+                for expected in ('Hoist Inspected?','Chute Inspected?','North courtyard','48','Example Hoist','East bay','36','Example Chute'):
+                    self.assertIn(expected,text)
+
 
 class LifecycleAndStamp(unittest.TestCase):
     def setUp(self):
@@ -86,6 +97,28 @@ class LifecycleAndStamp(unittest.TestCase):
         self.assertEqual(self.client.get('/inspections',headers=HEADERS).json(),[])
         self.assertEqual(self.client.put('/inspections/'+identity,headers=HEADERS,json=item).status_code,409)
         self.assertIn(identity,self.client.get('/sync/deletions',headers=HEADERS).json()['inspections'])
+    def test_compact_no_ois_pagination_with_complete_scaffold_and_reused_stamp(self):
+        owner='Sample PE'
+        stamp=self.client.post('/signing-assets',params={'owner':owner},headers=HEADERS,content=test_image()).json()['id']
+        for equipment in ('SH','SF'):
+            report=sample_report(equipment+'-No OIs')
+            report['attendees']=[{'name':'Example Contact','company':'Contractor','title':'Competent Person'},{'name':'Example Inspector','company':'NYC SCA','title':'Safety Inspector'},{'name':owner,'company':'DSENY','title':'PE'}]
+            report['site'].update(hoist_inspected='No',chute_inspected='No')
+            result=self.client.post('/inspections',headers=HEADERS,json={'title':'Layout sample','project':report['project'],'inspection_date':report['inspection_date'],'reports':[report]}).json()
+            generated=self.client.post('/inspections/'+result['id']+'/reports',headers=HEADERS,json={'stamp_id':stamp,'stamp_reviewed':True,'mailbox_email':'inspector@example.com'}).json()
+            pdf=next(a for a in generated['artifacts'] if a['mime']=='application/pdf')
+            reader=PdfReader(BytesIO(self.client.get('/artifacts/'+pdf['id'],headers=HEADERS).content))
+            self.assertEqual(len(reader.pages),2)
+            self.assertIn('Section 2',' '.join(reader.pages[0].extract_text().split()))
+            self.assertNotIn('Section 3',reader.pages[0].extract_text())
+            self.assertIn('Section 3',' '.join(reader.pages[1].extract_text().split()))
+            self.assertIn('DSENY adheres',reader.pages[1].extract_text())
+            self.assertIn('PE signature/seal:',reader.pages[1].extract_text())
+            if equipment=='SF':self.assertIn('Hoist Model',reader.pages[1].extract_text())
+            eml=next(a for a in generated['artifacts'] if a['filename'].endswith('.eml'))
+            message=BytesParser(policy=policy.default).parsebytes(self.client.get('/artifacts/'+eml['id'],headers=HEADERS).content)
+            self.assertEqual(str(message['From']),'inspector@example.com')
+
     def test_stamp_review_owner_page_two_and_email_attachment(self):
         item=self.inspection();identity=item['id'];owner=item['reports'][0]['attendees'][0]['name']
         self.assertEqual(self.client.post('/signing-assets?owner=Test',content=test_image()).status_code,401)

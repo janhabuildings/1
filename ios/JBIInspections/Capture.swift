@@ -96,11 +96,16 @@ struct MailDraft: UIViewControllerRepresentable {
     var subject: String
     var html: String
     var attachments: [MailAttachment]
+    var sender: String
+    var to: [String]
+    var cc: [String]
     @Environment(\.dismiss) var dismiss
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIViewController(context: Context) -> MFMailComposeViewController {
         let controller = MFMailComposeViewController(); controller.mailComposeDelegate = context.coordinator
         controller.setSubject(subject); controller.setMessageBody(html, isHTML: true)
+        if !sender.isEmpty { controller.setPreferredSendingEmailAddress(sender) }
+        controller.setToRecipients(to); controller.setCcRecipients(cc)
         for attachment in attachments {
             controller.addAttachmentData(attachment.data, mimeType: "application/pdf", fileName: attachment.filename)
         }

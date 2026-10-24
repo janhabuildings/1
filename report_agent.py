@@ -14,7 +14,7 @@ import tempfile
 from zipfile import ZipFile
 from docx import Document
 from docx.table import _Cell
-from docx.shared import Inches
+from docx.shared import Inches, Pt
 from lxml import etree
 
 ROOT = Path(__file__).resolve().parent
@@ -63,8 +63,6 @@ def validate(data, *, draft=False):
     for name in ('drawings_on_site', 'drawings_approved'):
         if data.get(name) not in (('Yes', 'No', 'NA', '[Pending confirmation]') if draft else ('Yes', 'No', 'NA')):
             raise ValueError(f'{name} must be Yes, No, or NA')
-    if data.get('hoist') or data.get('chute'):
-        raise ValueError('Hoist/chute inspections require a separate supported template')
     attendees = data.get('attendees')
     if not isinstance(attendees, list) or not attendees:
         raise ValueError('Provide actual attendees, including the inspecting PE')
@@ -87,6 +85,11 @@ def validate(data, *, draft=False):
         'outrigger_levels', 'tie_type', 'dunnage_type')
     for name in fields:
         require(data.get('site', {}).get(name), 'site.' + name)
+    if data['equipment']=='SF':
+        for kind in ('hoist','chute'):
+            answer=data.get('site',{}).get(kind+'_inspected','')
+            if answer and answer not in ('Yes','No','NA','[Pending confirmation]'):
+                raise ValueError(kind+'_inspected must be Yes, No or NA')
     if draft:
         return  # Report-only review draft: no mail headers or recipient claims.
     for name in ('sender', 'to', 'cc'):
@@ -139,7 +142,7 @@ TEMPLATE_FIELDS = tuple(('client project subject_project requested_by permit add
     'request_date inspection_date drawings_on_site drawings_approved product status attendees open_items '
     'source_references photo_references').split()) + tuple('site.'+k for k in (
     'length_ft','height_ft','sections','width_ft','tie_horizontal','tie_vertical',
-    'planked_levels','outrigger_levels','tie_type','dunnage_type','report_type','other_name','details'))
+    'planked_levels','outrigger_levels','tie_type','dunnage_type','hoist_inspected','chute_inspected','hoist_locations','hoist_height','hoist_model','chute_locations','chute_height','chute_model','report_type','other_name','details'))
 TOKEN = re.compile(r'\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}')
 
 
@@ -195,14 +198,47 @@ def fill_placeholders(data, output, source, mapping, reserve_signature=False):
                         if first!=last:
                             for _,_,middle in offsets[first+1:last]: middle.text=''
                             end_node.text=suffix
-                if reserve_signature and item.filename=='word/document.xml':
-                    for section in root.findall('.//w:sectPr',NS):
-                        margin=section.find(W+'pgMar')
-                        if margin is not None: margin.set(W+'bottom',str(max(4320,int(margin.get(W+'bottom','0')))))
-                    changed=True
                 if changed: content=etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
             result.writestr(item,content)
     return source
+
+
+def compact_no_ois_layout(doc):
+    """Use two pages for normal reports; stamp overlays page two rather than reserving space."""
+    for section in doc.sections:
+        section.top_margin=Inches(0.5);section.bottom_margin=Inches(0.5)
+    # Empty template paragraphs are layout padding, not inspection content.
+    for paragraph in list(doc.paragraphs):
+        if not paragraph.text.strip() and not paragraph._p.xpath('.//w:drawing | .//w:pict | .//w:object'):
+            paragraph._p.getparent().remove(paragraph._p)
+    # Compact only oversized labels/dates in narrow Section 1 cells.
+    table=doc.tables[1]
+    for row_index,cols in ((2,range(6)),(3,(0,)),(4,(0,1))):
+        for col in cols:
+            for paragraph in physical_cells(table.rows[row_index])[col].paragraphs:
+                for run in paragraph.runs: run.font.size=Pt(10)
+    for paragraph in doc.paragraphs:
+        if '347-730-6990' in paragraph.text:
+            for run in paragraph.runs:run.font.size=Pt(10)
+    # The complete scaffold table has extra hoist/chute rows; keep the small
+    # specification text readable while leaving room for the full conclusion.
+    for row in doc.tables[3].rows:
+        for cell in physical_cells(row):
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.space_after=Pt(0)
+                for run in paragraph.runs:run.font.size=Pt(10)
+    in_conclusion=False
+    for paragraph in doc.paragraphs:
+        if paragraph.text.strip().startswith('Section 4'):in_conclusion=True
+        if in_conclusion:
+            paragraph.paragraph_format.space_after=Pt(0)
+            paragraph.paragraph_format.line_spacing=1.0
+            for run in paragraph.runs:run.font.size=Pt(10)
+    # Sections 1 and 2 stay together on page one. Section 3 begins page two.
+    page=etree.Element(W+'p');props=etree.SubElement(page,W+'pPr')
+    etree.SubElement(props,W+'pageBreakBefore')
+    spacing=etree.SubElement(props,W+'spacing');spacing.set(W+'before','0');spacing.set(W+'after','0')
+    doc.tables[3]._element.addprevious(page)
 
 
 def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None, reserve_signature=False):
@@ -255,10 +291,19 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         replace_cell(physical_cells(site.rows[loc_index+2])[3],measures['outrigger_levels'])
         replace_cell(physical_cells(site.rows[loc_index+3])[1],measures['tie_type'])
         replace_cell(physical_cells(site.rows[loc_index+4])[1],measures['dunnage_type'])
-        if variant == 'Ois':
-            # These example rows are not present in the No OIs master.
-            for row in list(site.rows)[loc_index+5:]:
-                site._tbl.remove(row._tr)
+        # Reuse the original scaffold master rows for the full hoist/chute fields.
+        if len(site.rows) <= loc_index+5:
+            master = Document(ROOT/'templates/New Template SF-Ois.docx').tables[3]
+            for row in list(master.rows)[7:13]: site._tbl.append(deepcopy(row._tr))
+        extras = [('hoist_inspected',1),('chute_inspected',1),('hoist_locations',1),
+                  ('hoist_height',1),('chute_locations',1),('chute_height',1)]
+        for offset,(key,col) in enumerate(extras,loc_index+5):
+            flag = 'hoist_inspected' if key.startswith('hoist') else 'chute_inspected'
+            value = measures.get(key) or ('NA' if measures.get(flag) in ('No','NA') else '[Pending confirmation]')
+            replace_cell(physical_cells(site.rows[offset])[col],value)
+        for offset,key in ((loc_index+8,'hoist_model'),(loc_index+10,'chute_model')):
+            flag = 'hoist_inspected' if key.startswith('hoist') else 'chute_inspected'
+            replace_cell(physical_cells(site.rows[offset])[3],measures.get(key) or ('NA' if measures.get(flag) in ('No','NA') else '[Pending confirmation]'))
     if data['status'] == 'OIs':
         t = doc.tables[4]
         start = next(i for i,row in enumerate(t.rows) if row.cells[0].text.strip() == 'Number') + 1
@@ -270,9 +315,8 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         replace_cell(t.rows[0].cells[0],'Section 4 Inspection findings — No open items')
         set_rows(t,2,[('',data['locations'],'No open items were reported in the inspected locations.')])
         doc.tables[5]._element.getparent().remove(doc.tables[5]._element)
+    if data['status']=='No OIs': compact_no_ois_layout(doc)
     separate_sections(doc)
-    if reserve_signature:
-        for section in doc.sections: section.bottom_margin=max(section.bottom_margin,Inches(3.0))
     # Copy all original package parts verbatim except the populated main document.
     xml = etree.tostring(doc._element, xml_declaration=True, encoding='UTF-8', standalone=True)
     with ZipFile(source) as original, ZipFile(output, 'w') as result:

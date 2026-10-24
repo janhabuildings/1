@@ -103,7 +103,7 @@ def calendar_candidates(text):
     # Outlook copies may use inline values, tab-separated cells or stacked labels.
     aliases = {
         'client': ['client', 'contractor', 'company'],
-        'project': ['project', 'project name', 'school', 'school name'],
+        'project': ['project', 'project name', 'project/location', 'project / location', 'school/location', 'school / location', 'school', 'school name'],
         'request_date': ['request date', 'requested date', 'date requested'],
         'inspection_date': ['inspected on', 'inspection date'],
         'requested_by': ['request by', 'requested by', 'requester', 'requested by company'],
@@ -119,6 +119,13 @@ def calendar_candidates(text):
     # on one row. Flatten cells first so inline and stacked layouts share a parser.
     lines = [re.sub(r'\s+', ' ', cell).strip() for line in text.replace('\u00a0', ' ').splitlines()
              for cell in line.split('\t') if cell.strip()]
+    # Some clipboard sources flatten table cells into one space-separated line.
+    inline = re.compile(r'(?<!\S)(?:' + names + r')\s*:', re.I)
+    flattened = []
+    for line in lines:
+        cuts = [0] + [m.start() for m in inline.finditer(line) if m.start() > 0] + [len(line)]
+        flattened.extend(line[a:b].strip() for a,b in zip(cuts,cuts[1:]) if line[a:b].strip())
+    lines = flattened
     values = {}; key = None
     for line in lines:
         match = label_re.match(line)
@@ -174,6 +181,9 @@ def calendar_candidates(text):
             if types == {key} and re.fullmatch(r'[A-Z0-9][A-Z0-9-]*', result['permit'], re.I):
                 item['permit'] = result['permit']
         if len(item)>1: equipment.append(item)
+    if not result.get('project'):
+        projects = {m.group(1).strip() for m in re.finditer(r'^\d{4}-\d{2}-\d{2} (.+?) (?:Supported Scaffold|Sidewalk Shed|Fall Protection|SOE|Fence)-[IVXLCDM\d]+-Inspection-(?:No\s+OIs|OIs)\s*$', text, re.I|re.M)}
+        if len(projects)==1: result['project']=next(iter(projects))
     titles = []
     for line in text.splitlines():
         title = re.sub(r'\s+', ' ', line).strip()

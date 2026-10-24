@@ -7,7 +7,7 @@ import ImageIO
 
 struct SharedItems: Identifiable { let id = UUID(); var items: [Any] }
 struct MailAttachment { var data: Data; var filename: String }
-struct MailPayload: Identifiable { let id = UUID(); var subject: String; var html: String; var attachments: [MailAttachment] }
+struct MailPayload: Identifiable { let id = UUID(); var subject: String; var html: String; var attachments: [MailAttachment]; var sender: String; var to: [String]; var cc: [String] }
 
 struct InspectionList: View {
     @EnvironmentObject var store: InspectionStore
@@ -68,6 +68,9 @@ struct InspectionList: View {
 
 struct SettingsView: View {
     @AppStorage("backendURL") private var backendURL = API.defaultBaseURL
+    @AppStorage("draftMailboxEmail") private var draftMailboxEmail = ""
+    @AppStorage("draftToEmails") private var draftToEmails = ""
+    @AppStorage("draftCCEmails") private var draftCCEmails = ""
     @State private var token = SecureToken.read()
     @State private var result = ""
     @Environment(\.dismiss) var dismiss
@@ -75,6 +78,12 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 StampSettings()
+                Section("Saved draft email account") {
+                    TextField("Draft mailbox / From email", text: $draftMailboxEmail).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Default To emails (comma separated)", text: $draftToEmails).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Default Cc emails (comma separated)", text: $draftCCEmails).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Text("Use an account configured in Apple Mail. Open the draft, verify From, then Cancel → Save Draft to put it in that account’s Drafts folder. Email myself a copy addresses a new message to the saved mailbox; you decide whether to send.").font(.caption)
+                }
                 Section("Private backend") {
                     TextField("Render backend URL", text: $backendURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Backend API token", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -103,6 +112,9 @@ struct SettingsView: View {
 }
 
 struct InspectionDetail: View {
+    @AppStorage("draftMailboxEmail") private var draftMailboxEmail = ""
+    @AppStorage("draftToEmails") private var draftToEmails = ""
+    @AppStorage("draftCCEmails") private var draftCCEmails = ""
     @EnvironmentObject var store: InspectionStore
     @State var inspection: Inspection
     @StateObject private var audio = AudioCapture()
@@ -225,7 +237,7 @@ struct InspectionDetail: View {
         } message: { Text(confirmationMessage) }
         .sheet(isPresented: $camera) { CameraView(captured: savePhoto).ignoresSafeArea() }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
-        .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments) }
+        .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments, sender: $0.sender, to: $0.to, cc: $0.cc) }
         .sheet(isPresented: $showText) { TextDraft(body: "\(inspection.project) — inspection \(inspection.inspection_date)\n\(inspection.notes)") }
         .fileImporter(isPresented: $importFile, allowedContentTypes: [.audio, .plainText], allowsMultipleSelection: false, onCompletion: importMedia)
     }
@@ -289,6 +301,16 @@ struct InspectionDetail: View {
         Section("Inspection") {
             TextField("Title", text: $inspection.title)
             TextField("Project", text: $inspection.project)
+            if let project = calendarCandidates?.fields["project"], !project.isEmpty, project != inspection.project {
+                Button("Use calendar project: " + project) {
+                    let previous = inspection.project
+                    inspection.project = project
+                    for index in inspection.reports.indices where inspection.reports[index].project.isEmpty || inspection.reports[index].project == previous {
+                        inspection.reports[index].project = project
+                    }
+                    store.save(inspection)
+                }
+            }
             TextField("Inspection date · YYYY-MM-DD", text: $inspection.inspection_date)
             Text("Paste the complete calendar entry below.").font(.caption)
             TextEditor(text: $inspection.calendar_text).frame(minHeight: 140).accessibilityLabel("Calendar content")
@@ -395,6 +417,10 @@ struct InspectionDetail: View {
     private func artifacts(_ result: ExportResult) -> some View {
         Section("Generated review files") {
             Text(result.notice).font(.caption)
+            Text("Draft mailbox: " + (draftMailboxEmail.isEmpty ? "Not set — add in Settings" : draftMailboxEmail)).font(.caption)
+            TextField("To emails (comma separated)", text: $draftToEmails).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+            TextField("Cc emails (comma separated)", text: $draftCCEmails).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+            Text("Open in Mail, verify From, then Cancel → Save Draft. Nothing is sent automatically.").font(.caption)
             ForEach(result.artifacts) { artifact in
                 VStack(alignment: .leading) {
                     Text(artifact.filename).font(.caption)
@@ -404,7 +430,8 @@ struct InspectionDetail: View {
                             Task { do { share = SharedItems(items: [try await store.download(artifact, inspectionID: inspection.id)]) } catch { store.error = error.localizedDescription } }
                         }.buttonStyle(.borderless)
                         if artifact.mime == "text/html" {
-                            Button("Email draft") { compose(artifact, artifacts: result.artifacts) }.buttonStyle(.borderless)
+                            Button("Open draft in Mail") { compose(artifact, artifacts: result.artifacts) }.buttonStyle(.borderless)
+                            Button("Email myself a copy") { compose(artifact, artifacts: result.artifacts, toMyself: true) }.buttonStyle(.borderless).disabled(draftMailboxEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }
                 }
@@ -412,7 +439,7 @@ struct InspectionDetail: View {
             if let data = try? JSONEncoder().encode(result.reports), let text = String(data: data, encoding: .utf8) {
                 Text(text).font(.caption2).textSelection(.enabled)
             }
-            Text("Check fonts, wrapping and page breaks before delivery. PDFs are unsigned review drafts.").font(.caption).foregroundStyle(.orange)
+            Text("Check fonts, wrapping and page breaks before delivery. PDFs are review drafts; verify any applied stamp and final layout.").font(.caption).foregroundStyle(.orange)
         }
     }
     private func addReport(_ type: String) {
@@ -509,7 +536,7 @@ struct InspectionDetail: View {
         }
         for index in inspection.reports.indices {
             if calendarFieldMissing(inspection.reports[index].client) { inspection.reports[index].client = candidates.fields["client"] ?? "" }
-            if calendarFieldMissing(inspection.reports[index].project) { inspection.reports[index].project = candidates.fields["project"] ?? "" }
+            if calendarFieldMissing(inspection.reports[index].project) { inspection.reports[index].project = candidates.fields["project"] ?? inspection.project }
             if calendarFieldMissing(inspection.reports[index].requested_by) { inspection.reports[index].requested_by = candidates.fields["requested_by"] ?? "" }
             if calendarFieldMissing(inspection.reports[index].address) { inspection.reports[index].address = candidates.fields["address"] ?? "" }
             if calendarFieldMissing(inspection.reports[index].request_date) { inspection.reports[index].request_date = candidates.fields["request_date"] ?? "" }
@@ -570,6 +597,7 @@ struct InspectionDetail: View {
                 }
                 store.save(inspection); try await store.sync(inspection)
                 var options: [String: Any] = [:]
+                if !draftMailboxEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { options["mailbox_email"] = draftMailboxEmail.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if stampApproved {
                     let owner = UserDefaults.standard.string(forKey: "stampOwnerName") ?? ""
                     guard !owner.trimmingCharacters(in: .whitespaces).isEmpty else { throw APIError(message: "Enter the stamp engineer name in Settings.") }
@@ -577,14 +605,14 @@ struct InspectionDetail: View {
                     guard FileManager.default.fileExists(atPath: path.path) else { throw APIError(message: "Choose your signature/stamp image in Settings first.") }
                     let encoded = owner.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? ""
                     let stamp = try JSONDecoder().decode(StampAsset.self, from: await store.api.request("/signing-assets?owner=\(encoded)", method: "POST", body: Data(contentsOf: path), mime: "image/png"))
-                    options = ["stamp_id": stamp.id, "stamp_reviewed": true]
+                    options["stamp_id"] = stamp.id; options["stamp_reviewed"] = true
                 }
                 let data = try await store.api.json("/inspections/\(inspection.id)/reports", object: options)
                 export = try JSONDecoder().decode(ExportResult.self, from: data)
             } catch { store.error = error.localizedDescription }
         }
     }
-    private func compose(_ htmlArtifact: Artifact, artifacts: [Artifact]) {
+    private func compose(_ htmlArtifact: Artifact, artifacts: [Artifact], toMyself: Bool = false) {
         guard MFMailComposeViewController.canSendMail() else { store.error = "Configure an account in Apple's Mail app to use the HTML composer. You can still share the generated files."; return }
         Task {
             do {
@@ -598,7 +626,17 @@ struct InspectionDetail: View {
                     attachments.append(MailAttachment(data: data, filename: artifact.filename))
                 }
                 let subject = htmlArtifact.filename.replacingOccurrences(of: " - DRAFT.html", with: "").replacingOccurrences(of: " - Cover.html", with: "")
-                mail = MailPayload(subject: subject, html: html, attachments: attachments)
+                let sender = draftMailboxEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+                func addresses(_ text: String) throws -> [String] {
+                    let values = text.split(whereSeparator: { $0 == "," || $0 == ";" }).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                    guard values.allSatisfy({ $0.range(of: #"^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$"#, options: .regularExpression) != nil }) else { throw APIError(message: "Check the email addresses in Settings / draft recipients.") }
+                    return values
+                }
+                let senderAddresses = try addresses(sender)
+                guard senderAddresses.count <= 1 else { throw APIError(message: "Enter one draft mailbox email in Settings.") }
+                let recipients = try addresses(toMyself ? sender : draftToEmails)
+                let copies = try addresses(toMyself ? "" : draftCCEmails)
+                mail = MailPayload(subject: subject, html: html, attachments: attachments, sender: sender, to: recipients, cc: copies)
             } catch { store.error = error.localizedDescription }
         }
     }
