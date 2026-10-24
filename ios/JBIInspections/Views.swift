@@ -432,7 +432,7 @@ struct InspectionDetail: View {
                 try await Task.sleep(for: .seconds(2))
                 guard !Task.isCancelled, !busy else { return }
                 try await store.sync(inspection)
-                status = "Synced to backend. Use Refresh saved on the website to see updates."
+                if !Task.isCancelled && !store.cache.dirty.contains(inspection.id) { status = "Synced to backend. Use Refresh saved on the website to see updates." }
             } catch is CancellationError { }
             catch { if !Task.isCancelled { status = "Saved on this phone; sync failed: " + error.localizedDescription } }
         }

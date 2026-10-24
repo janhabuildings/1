@@ -6,6 +6,7 @@ import Foundation
     @Published var error: String?
     @Published var busy = false
     let directory: URL
+    private var activeSyncs: [String: (id: UUID, task: Task<Void, Error>)] = [:]
     init() {
         directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("JBIInspections", isDirectory: true)
@@ -48,6 +49,7 @@ import Foundation
         }
     }
     func removeInspection(_ id: String) {
+        activeSyncs[id]?.task.cancel()
         for (artifact,owner) in cache.artifactOwners ?? [:] where owner == id {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent("exports").appendingPathComponent(artifact))
             cache.artifactOwners?.removeValue(forKey: artifact)
@@ -67,6 +69,19 @@ import Foundation
         cache.pendingMediaDeletions?.insert(id); cache.dirty.insert(item.inspectionID); persist()
     }
     func sync(_ inspection: Inspection) async throws {
+        while let prior = activeSyncs[inspection.id] {
+            let finished = await prior.task.result
+            if activeSyncs[inspection.id]?.id == prior.id { activeSyncs.removeValue(forKey: inspection.id) }
+            try finished.get()
+        }
+        guard let latest = cache.inspections.first(where: { $0.id == inspection.id }) else { return }
+        let token = UUID()
+        let task = Task { try await performSync(latest) }
+        activeSyncs[inspection.id] = (token, task)
+        defer { if activeSyncs[inspection.id]?.id == token { activeSyncs.removeValue(forKey: inspection.id) } }
+        try await task.value
+    }
+    private func performSync(_ inspection: Inspection) async throws {
         try await flushDeletions()
         guard cache.inspections.contains(where: { $0.id == inspection.id }) else { return }
         _ = try await api.request("/inspections/\(inspection.id)", method: "PUT", body: JSONEncoder().encode(inspection))
