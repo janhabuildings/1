@@ -189,11 +189,15 @@ def create_app(settings=None):
         import uuid
         try: uuid.UUID(identity)
         except ValueError: raise HTTPException(422,'Inspection ID must be a UUID')
-        if identity in lifecycle.deletions(store)['inspections']: raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
         payload=dict(json.loads(data.model_dump_json()),id=identity)
-        removed=set(lifecycle.deletions(store)['media'])
-        for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
-        return store.save(payload)
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
+                raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
+            removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
+            for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
+            db.execute('INSERT INTO inspections VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(identity,json.dumps(payload)))
+        return payload
 
     @app.post('/calendar/extract',dependencies=[Depends(authorized)])
     async def extract_calendar(request:Request):
@@ -230,18 +234,24 @@ def create_app(settings=None):
             import uuid
             try: uuid.UUID(x_asset_id)
             except ValueError: raise HTTPException(422,'Asset ID must be a UUID')
-            with store.connect() as db:
-                existing=db.execute('SELECT * FROM media WHERE id=?',(x_asset_id,)).fetchone()
-            if existing:
-                if existing['inspection_id']!=identity or Path(existing['path']).read_bytes()!=bytes(data):
-                    raise HTTPException(409,'Asset ID already belongs to different content')
-                return next(x for x in store.media(identity) if x['id']==x_asset_id)
-        identity_file=x_asset_id or uid();path=store.root/'media'/(identity_file+types[mime][0]);path.write_bytes(data)
+        identity_file=x_asset_id or uid();path=store.root/'media'/(identity_file+types[mime][0])
         safe_name=Path(filename.replace('\\','/')).name[:150]
         with store.connect() as db:
-            db.execute('INSERT INTO media(id,inspection_id,kind,mime,filename,path) VALUES (?,?,?,?,?,?)',
-                       (identity_file,identity,kind,mime,safe_name,str(path)))
-        return next(x for x in store.media(identity) if x['id']==identity_file)
+            db.execute('BEGIN IMMEDIATE')
+            if not db.execute('SELECT 1 FROM inspections WHERE id=?',(identity,)).fetchone() or db.execute('SELECT 1 FROM deleted_media WHERE id=?',(identity_file,)).fetchone():
+                raise HTTPException(409,'Inspection or evidence was deleted during upload. Refresh before continuing.')
+            existing=db.execute('SELECT * FROM media WHERE id=?',(identity_file,)).fetchone()
+            if existing:
+                if existing['inspection_id']!=identity or (Path(existing['path']).exists() and Path(existing['path']).read_bytes()!=bytes(data)):
+                    raise HTTPException(409,'Asset ID already belongs to different content')
+                if not Path(existing['path']).exists(): Path(existing['path']).write_bytes(data)
+                record=dict(existing)
+            else:
+                path.write_bytes(data)
+                db.execute('INSERT INTO media(id,inspection_id,kind,mime,filename,path) VALUES (?,?,?,?,?,?)',
+                           (identity_file,identity,kind,mime,safe_name,str(path)))
+                record={'id':identity_file,'inspection_id':identity,'kind':kind,'mime':mime,'filename':safe_name,'note':'','equipment':''}
+        return {key:record[key] for key in ('id','inspection_id','kind','mime','filename','note','equipment')}
 
     @app.put('/media/{identity}',dependencies=[Depends(authorized)])
     def label_media(identity:str,data:UploadInfo):
@@ -390,16 +400,24 @@ def create_app(settings=None):
         artifacts=[]
         types={'.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                '.pdf':'application/pdf','.html':'text/html','.eml':'message/rfc822'}
-        for path in output.rglob('*'):
-            if path.suffix not in types or not path.is_file(): continue
-            artifact=uid()
-            with store.connect() as db:
-                if identity is None:
-                    db.execute('INSERT INTO template_artifacts VALUES (?,?,?,?,?)',
-                        (artifact,next(iter(selected.values()))['id'],path.name,types[path.suffix],str(path)))
-                else:
-                    db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?)',(artifact,identity,path.name,types[path.suffix],str(path)))
-            artifacts.append({'id':artifact,'filename':path.name,'mime':types[path.suffix],'equipment':path.parent.name,'generation_id':output.name})
+        removed_during_generation=False
+        with store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            removed_during_generation=bool(identity and db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone())
+            if not removed_during_generation:
+                for path in output.rglob('*'):
+                    if path.suffix not in types or not path.is_file(): continue
+                    artifact=uid()
+                    if identity is None:
+                        db.execute('INSERT INTO template_artifacts VALUES (?,?,?,?,?)',
+                            (artifact,next(iter(selected.values()))['id'],path.name,types[path.suffix],str(path)))
+                    else:
+                        db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?)',(artifact,identity,path.name,types[path.suffix],str(path)))
+                    artifacts.append({'id':artifact,'filename':path.name,'mime':types[path.suffix],'equipment':path.parent.name,'generation_id':output.name})
+        if removed_during_generation:
+            import shutil
+            if output.is_dir(): shutil.rmtree(output)
+            raise HTTPException(409,'Inspection was deleted during generation; no new files were retained')
         # Server filesystem locations are not public download URLs.
         summaries=[{key:value for key,value in report.items() if key in
                     ('equipment','subject','missing_fields','font_audit','renderer','delivery_ready','status','review_required','error','template_version','visual_stamp')}

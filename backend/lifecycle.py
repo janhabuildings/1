@@ -27,6 +27,7 @@ def unlink(store,path):
 def delete_inspection(store,identity):
     now=datetime.now(timezone.utc).isoformat()
     with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         runs=[Path(r['path']).resolve() for r in db.execute('SELECT path FROM report_runs WHERE inspection_id=?',(identity,))]
         files=list(db.execute('SELECT path FROM media WHERE inspection_id=?',(identity,)))+list(db.execute('SELECT path FROM artifacts WHERE inspection_id=?',(identity,)))
         db.execute('INSERT OR IGNORE INTO deleted_media SELECT id,inspection_id,? FROM media WHERE inspection_id=?',(now,identity))
@@ -50,6 +51,7 @@ def delete_inspection(store,identity):
 
 def delete_media(store,identity):
     with store.connect() as db:
+        db.execute('BEGIN IMMEDIATE')
         row=db.execute('SELECT * FROM media WHERE id=?',(identity,)).fetchone()
         if not row: return {'deleted':True}
         db.execute('INSERT OR IGNORE INTO deleted_media VALUES (?,?,?)',(identity,row['inspection_id'],datetime.now(timezone.utc).isoformat()))

@@ -217,47 +217,70 @@ struct InspectionDetail: View {
                 do { export = try JSONDecoder().decode(ExportResult.self, from: await store.api.request("/inspections/\(inspection.id)/artifacts")) } catch { }
             }
         }
-        .confirmationDialog("Delete this inspection and its evidence on all synced devices?", isPresented: $deleteThisInspection, titleVisibility: .visible) {
-            Button("Delete inspection", role: .destructive) {
-                autoSyncTask?.cancel(); store.removeInspection(inspection.id); closeInspection()
-                Task { do { if store.connected { try await store.flushDeletions() } } catch { store.error = "Deleted locally; server deletion queued until reconnect." } }
-            }
-        }
-        .confirmationDialog("Remove this evidence from the inspection?", isPresented: Binding(get: { removeMediaID != nil }, set: { if !$0 { removeMediaID = nil } }), titleVisibility: .visible) {
-            Button("Delete evidence", role: .destructive) {
-                if let id = removeMediaID {
-                    store.removeMedia(id); selectedAIPhotos.remove(id)
-                    for i in inspection.reports.indices { inspection.reports[i].photo_references.removeAll { $0 == id } }
-                    scheduleSync()
-                }
-                removeMediaID = nil
-            }
-        }
-        .confirmationDialog("Remove this report from the inspection?", isPresented: Binding(get: { removeReportType != nil }, set: { if !$0 { removeReportType = nil } }), titleVisibility: .visible) {
-            Button("Remove report", role: .destructive) { inspection.reports.removeAll { $0.equipment == removeReportType }; removeReportType = nil }
-        }
-        .confirmationDialog("Delete this generated file?", isPresented: Binding(get: { removeArtifactID != nil }, set: { if !$0 { removeArtifactID = nil } }), titleVisibility: .visible) {
-            Button("Delete file", role: .destructive) {
-                if let id = removeArtifactID { Task { do { _ = try await store.api.request("/artifacts/\(id)", method: "DELETE"); export?.artifacts.removeAll { $0.id == id }; try? FileManager.default.removeItem(at: store.directory.appendingPathComponent("exports").appendingPathComponent(id)); store.cache.artifactOwners?.removeValue(forKey: id); store.persist() } catch { store.error = error.localizedDescription } } }
-                removeArtifactID = nil
-            }
-        }
-        .confirmationDialog("Apply your saved signature/stamp to No OIs PDFs?", isPresented: $stampConsent, titleVisibility: .visible) {
-            Button("I reviewed the report and authorize this stamp") { generate(stampApproved: true) }
-        } message: { Text("Review the unsigned report first. Your saved image will be placed on page 2 only for No OIs reports, and its engineer name must match an actual PE attendee. This does not create a cryptographic digital signature.") }
+        .confirmationDialog(confirmationTitle, isPresented: Binding(get: { confirmationPresented }, set: { if !$0 { clearConfirmation() } }), titleVisibility: .visible) {
+            confirmationButtons
+        } message: { Text(confirmationMessage) }
         .sheet(isPresented: $camera) { CameraView(captured: savePhoto).ignoresSafeArea() }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments) }
         .sheet(isPresented: $showText) { TextDraft(body: "\(inspection.project) — inspection \(inspection.inspection_date)\n\(inspection.notes)") }
         .fileImporter(isPresented: $importFile, allowedContentTypes: [.audio, .plainText], allowsMultipleSelection: false, onCompletion: importMedia)
-        .confirmationDialog("Record this conversation?", isPresented: $recordConsent, titleVisibility: .visible) {
-            Button("Participants informed — start recording") {
-                Task { do { try await audio.start() } catch { store.error = error.localizedDescription } }
+    }
+    private var confirmationPresented: Bool {
+        deleteThisInspection || removeMediaID != nil || removeReportType != nil || removeArtifactID != nil || stampConsent || recordConsent || aiConsent
+    }
+    private var confirmationTitle: String {
+        if deleteThisInspection { return "Delete this inspection and its evidence on all synced devices?" }
+        if removeMediaID != nil { return "Remove this evidence from the inspection?" }
+        if removeReportType != nil { return "Remove this report from the inspection?" }
+        if removeArtifactID != nil { return "Delete this generated file?" }
+        if stampConsent { return "Apply your saved signature/stamp to No OIs PDFs?" }
+        if recordConsent { return "Record this conversation?" }
+        return "Send inspection data for AI analysis?"
+    }
+    private var confirmationMessage: String {
+        if stampConsent { return "Review the unsigned report first. Your image is placed on page 2 only for No OIs PDFs and its engineer must match an actual PE attendee. This is not a cryptographic digital signature." }
+        if recordConsent { return "Record only after participants are informed and consent requirements are met. Recording stops when you leave this screen or the app becomes inactive." }
+        if aiConsent { return "Calendar, notes, transcript and up to six selected photos are sent to the configured AI provider. Draft DOB/SCA references and findings require your review." }
+        return "Deletion of synced inspection data is shared with other devices."
+    }
+    private func clearConfirmation() {
+        deleteThisInspection = false; removeMediaID = nil; removeReportType = nil; removeArtifactID = nil
+        stampConsent = false; recordConsent = false; aiConsent = false
+    }
+    @ViewBuilder private var confirmationButtons: some View {
+        if deleteThisInspection {
+            Button("Delete inspection", role: .destructive) {
+                autoSyncTask?.cancel(); store.removeInspection(inspection.id); closeInspection()
+                Task { do { if store.connected { try await store.flushDeletions() } } catch { store.error = "Deleted locally; server deletion queued until reconnect." } }
             }
-        } message: { Text("Record only when participants are informed and applicable consent requirements are met. Recording stops when you leave this screen or the app becomes inactive.") }
-        .confirmationDialog("Send inspection data for AI analysis?", isPresented: $aiConsent, titleVisibility: .visible) {
+        } else if let id = removeMediaID {
+            Button("Delete evidence", role: .destructive) {
+                store.removeMedia(id); selectedAIPhotos.remove(id)
+                for i in inspection.reports.indices { inspection.reports[i].photo_references.removeAll { $0 == id } }
+                scheduleSync()
+            }
+        } else if let type = removeReportType {
+            Button("Remove report", role: .destructive) { inspection.reports.removeAll { $0.equipment == type } }
+        } else if let id = removeArtifactID {
+            Button("Delete file", role: .destructive) {
+                Task {
+                    do {
+                        _ = try await store.api.request("/artifacts/\(id)", method: "DELETE")
+                        export?.artifacts.removeAll { $0.id == id }
+                        try? FileManager.default.removeItem(at: store.directory.appendingPathComponent("exports").appendingPathComponent(id))
+                        store.cache.artifactOwners?.removeValue(forKey: id); store.persist()
+                    } catch { store.error = error.localizedDescription }
+                }
+            }
+        } else if stampConsent {
+            Button("I reviewed the report and authorize this stamp") { generate(stampApproved: true) }
+        } else if recordConsent {
+            Button("Participants informed — start recording") { Task { do { try await audio.start() } catch { store.error = error.localizedDescription } } }
+        } else if aiConsent {
             Button("Send notes, transcript and up to six photos") { analyze() }
-        } message: { Text("This sends calendar text, notes, transcript and up to six photos you select to the backend's configured AI provider. It also retrieves draft DOB/SCA references using the observed conditions. Confirm source applicability and field uncertainties before adopting a suggestion.") }
+        }
+        Button("Cancel", role: .cancel) { clearConfirmation() }
     }
     private var basics: some View {
         Section("Inspection") {
