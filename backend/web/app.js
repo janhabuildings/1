@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {token:'', id:null, reports:[], attendees:[], media:[], candidates:null, urls:[], busy:false, dirty:false};
+const state = {token:'', id:null, reports:[], activeReport:null, attendees:[], media:[], candidates:null, urls:[], busy:false, dirty:false};
 const common = ['title','project','inspection_date','request_date','client','requested_by','address','subject_project','calendar_text','notes','transcript'];
 const equipmentLabel = code => code==='SF'?'Scaffold':code==='SH'?'Shed':'Other';
 const today = () => {const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
@@ -36,8 +36,21 @@ function siteChoice(label,value,change,options,separator='; '){
   search.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();custom.click();}};
   render();return root;
 }
-function reset(){state.id=null;state.reports=[];state.attendees=[];state.media=[];state.candidates=null;state.urls.forEach(URL.revokeObjectURL);state.urls=[];common.forEach(k=>$(k).value='');$('inspection_date').value=today();$('generated').replaceChildren();$('suggestions').replaceChildren();$('calendar-candidates').hidden=true;renderAttendees();renderReports();renderMedia();state.dirty=false;$('save-state').textContent='New inspection · not saved';$('saved').value='';tab('inspection');}
-function addReport(equipment){if(state.reports.some(r=>r.equipment===equipment))return;state.reports.push({equipment,status:'',permit:'',inspection_code:'',locations:'',drawings_on_site:'',drawings_approved:'',site:{},open_items:[],source_references:[],photo_references:[]});renderReports();markDirty();}
+function reset(){state.id=null;state.reports=[];state.activeReport=null;state.attendees=[];state.media=[];state.candidates=null;state.urls.forEach(URL.revokeObjectURL);state.urls=[];common.forEach(k=>$(k).value='');$('inspection_date').value=today();$('generated').replaceChildren();$('suggestions').replaceChildren();$('calendar-candidates').hidden=true;renderAttendees();renderReports();renderMedia();state.dirty=false;$('save-state').textContent='New inspection · not saved';$('saved').value='';tab('inspection');}
+function addReport(equipment,activate=false){
+  if(!state.reports.some(r=>r.equipment===equipment)){
+    state.reports.push({equipment,status:'',permit:'',inspection_code:'',locations:'',drawings_on_site:'',drawings_approved:'',site:{},open_items:[],source_references:[],photo_references:[]});markDirty();
+  }
+  if(activate||!state.activeReport)state.activeReport=equipment;
+  renderReports();
+}
+function switchReport(equipment){
+  const existing=state.reports.find(r=>r.equipment===equipment);
+  if(existing){state.activeReport=equipment;renderReports();return;}
+  const current=state.reports.find(r=>r.equipment===state.activeReport)||state.reports[0];
+  if(!current){addReport(equipment,true);return;}
+  current.equipment=equipment;state.activeReport=equipment;renderReports();markDirty();
+}
 const attendeeRoles=['Competent Person/Site Supervisor','Safety Inspector','Competent Person/ Equipment Installation Supervisor','Competent Person','GC’s Project Manager','CM’s Representative','Owner’s Representative','PE'];
 const attendeeCompanies=['NYC SCA','DSENY Engineering Services PC','WCC'];
 function renderAttendees(){
@@ -49,8 +62,11 @@ function renderAttendees(){
     const remove=el('button','Remove','danger');remove.onclick=()=>{state.attendees.splice(i,1);renderAttendees();markDirty();};row.append(remove);root.append(row);
   });
 }
-function renderReports(){const root=$('report-list');root.replaceChildren();if(!state.reports.length)root.append(el('p','Add a scaffold, shed or Other report to begin.','empty'));state.reports.forEach((r,index)=>{
-  const card=el('article',undefined,'report-card');const heading=el('div',undefined,'section-heading');heading.append(el('h3',equipmentLabel(r.equipment)));const remove=el('button','Remove report','danger');remove.onclick=()=>{if(confirm('Remove this report from the draft?')){state.reports.splice(index,1);renderReports();markDirty();}};heading.append(remove);card.append(heading);
+function renderReports(){const root=$('report-list');root.replaceChildren();
+  if(!state.reports.some(r=>r.equipment===state.activeReport))state.activeReport=state.reports[0]?.equipment||null;
+  for(const equipment of ['SF','SH','OT']){const button=$('add-'+equipment);button.setAttribute('aria-selected',String(state.activeReport===equipment));button.classList.toggle('selected',state.activeReport===equipment);}
+if(!state.reports.length)root.append(el('p','Add a scaffold, shed or Other report to begin.','empty'));state.reports.forEach((r,index)=>{
+  const card=el('article',undefined,'report-card');card.id='report-'+r.equipment;card.setAttribute('role','tabpanel');card.setAttribute('aria-labelledby','add-'+r.equipment);card.hidden=r.equipment!==state.activeReport;const heading=el('div',undefined,'section-heading');heading.append(el('h3',equipmentLabel(r.equipment)));const remove=el('button','Remove report','danger');remove.onclick=()=>{if(confirm('Remove this report from the draft?')){state.reports.splice(index,1);renderReports();markDirty();}};heading.append(remove);card.append(heading);
   card.append(field('Inspection result',r.status,v=>r.status=v,{options:[['','Not confirmed'],['OIs','Open items'],['No OIs','No open items']]}));
   const grid=el('div',undefined,'grid');[['permit','Permit number'],['inspection_code','Inspection number · VII / VIII'],['locations','Actually inspected locations / extents']].forEach(([k,l])=>grid.append(field(l,r[k],v=>r[k]=v)));
   ['drawings_on_site','drawings_approved'].forEach((k,i)=>grid.append(field(i?'Drawings DOB/SCA approved?':'PE drawings on site?',r[k],v=>r[k]=v,{options:[['','Not confirmed'],['Yes','Yes'],['No','No'],['NA','NA']]})));
@@ -84,7 +100,7 @@ $('new').onclick=()=>{if(!state.dirty||confirm('Start a new inspection without s
 $('save').onclick=()=>action(async()=>{await save();toast('Inspection saved to the temporary test server.');});
 $('refresh').onclick=()=>action(async()=>{const id=state.id;await refreshList();if(id&&!state.dirty)await load(id);toast('Refreshed from backend.');});
 $('saved').onchange=()=>{const id=$('saved').value;if(id&&(!state.dirty||confirm('Load another inspection without saving current changes?')))action(()=>load(id));};
-$('add-attendee').onclick=()=>{state.attendees.push({id:crypto.randomUUID(),name:'',company:'',title:''});renderAttendees();markDirty();};['SF','SH','OT'].forEach(eq=>$(`add-${eq}`).onclick=()=>addReport(eq));
+$('add-attendee').onclick=()=>{state.attendees.push({id:crypto.randomUUID(),name:'',company:'',title:''});renderAttendees();markDirty();};['SF','SH','OT'].forEach(eq=>$(`add-${eq}`).onclick=()=>{document.activeElement?.blur();switchReport(eq);$('report-list').closest('.panel')?.scrollIntoView({block:'start',behavior:'auto'});});
 $('extract').onclick=()=>action(async()=>{state.candidates=await json('/calendar/extract',{method:'POST',json:{text:$('calendar_text').value}});const titles=state.candidates.titles||[];const select=$('calendar-title');select.replaceChildren();const blank=el('option','Choose a title…');blank.value='';select.append(blank);for(const title of titles){const option=el('option',title);option.value=title;select.append(option);}select.value=titles.includes($('title').value)?$('title').value:titles.length===1?titles[0]:'';$('calendar-title-options').hidden=!titles.length;$('use-calendar-title').disabled=!select.value;$('candidate-text').textContent=JSON.stringify(state.candidates,null,2);$('calendar-candidates').hidden=false;applyCalendar(false);toast('Calendar details filled. Review the fields, choose a title if needed, then save.');});$('apply-calendar').onclick=()=>applyCalendar();
 $('transcript-file').onchange=()=>action(async()=>{const file=$('transcript-file').files[0];if(!file)return;if(file.size>100000)throw new Error('Transcript text limit is 100,000 bytes.');$('transcript').value+=($('transcript').value?'\n\n':'')+await file.text();markDirty();$('transcript-file').value='';toast('Transcript imported. Review the text before adopting findings.');});
 $('upload').onchange=()=>action(async()=>{
@@ -140,5 +156,7 @@ async function refreshStamps(){const selected=$('stamp-selected').value;const it
 $('stamp-upload').onclick=()=>action(async()=>{const file=$('stamp-file').files[0];if(!file)throw new Error('Choose the stamp/signature image.');const owner=$('stamp-owner').value.trim();if(!owner)throw new Error('Enter the engineer name.');const item=await json('/signing-assets?'+new URLSearchParams({owner}),{method:'POST',body:file,mime:file.type});await refreshStamps();$('stamp-selected').value=item.id;toast('Stamp stored privately. Review your report and confirm before applying.');});
 $('stamp-delete').onclick=()=>action(async()=>{const id=$('stamp-selected').value;if(!id)return;if(!confirm('Delete this saved stamp image? Previously generated PDFs are unchanged.'))return;await json(`/signing-assets/${id}`,{method:'DELETE'});await refreshStamps();});
 
+['SF','SH','OT'].forEach(eq=>$('create-'+eq).onclick=()=>{addReport(eq,true);$('report-list').closest('.panel')?.scrollIntoView({block:'start',behavior:'auto'});});
+document.querySelectorAll('.report-type-tabs [role=tab]').forEach((button,index)=>{button.onkeydown=event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const buttons=[...document.querySelectorAll('.report-type-tabs [role=tab]')];const target=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[target].click();buttons[target].focus();};});
 $('calendar-title').onchange=()=>{const title=$('calendar-title').value;$('use-calendar-title').disabled=!title;if(title){$('title').value=title;markDirty();}};
 $('use-calendar-title').onclick=()=>{const title=$('calendar-title').value;if(!title)return;$('title').value=title;markDirty();toast('Inspection title updated. Confirm report outcomes separately.');};

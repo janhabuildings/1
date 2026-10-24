@@ -18,9 +18,13 @@ struct ReportFactsEditor: View {
         Binding(get: { selectedEquipment }, set: { equipment in
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             if !reports.contains(where: { $0.equipment == equipment }) {
-                var draft = ReportDraft(equipment: equipment)
-                draft.project = project; draft.inspection_date = inspectionDate
-                reports.append(draft)
+                if let index = reports.firstIndex(where: { $0.equipment == selectedEquipment }) {
+                    reports[index].equipment = equipment
+                } else {
+                    var draft = ReportDraft(equipment: equipment)
+                    draft.project = project; draft.inspection_date = inspectionDate
+                    reports.append(draft)
+                }
             }
             selectedEquipment = equipment
         })
