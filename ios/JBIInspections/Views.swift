@@ -118,6 +118,7 @@ struct InspectionDetail: View {
     @State private var suggestedFindings: [SuggestedFinding] = []
     @State private var analysisChecks: [String] = []
     @State private var calendarCandidates: CalendarCandidates?
+    @State private var selectedCalendarTitle = ""
     @State private var export: ExportResult?
     @State private var share: SharedItems?
     @State private var mail: MailPayload?
@@ -191,7 +192,18 @@ struct InspectionDetail: View {
             if !suggestions.isEmpty {
                 Section("Candidates and analysis details") {
                     Text(suggestions).font(.caption).textSelection(.enabled)
-                    if calendarCandidates != nil { Button("Use calendar candidates as draft facts") { applyCalendar() } }
+                    if let candidates = calendarCandidates {
+                        if let titles = candidates.titles, !titles.isEmpty {
+                            Picker("Inspection title from calendar", selection: $selectedCalendarTitle) {
+                                Text("Choose a title…").tag("")
+                                ForEach(titles, id: \.self) { title in Text(title).tag(title) }
+                            }.pickerStyle(.menu)
+                            Button("Use selected inspection title") { inspection.title = selectedCalendarTitle }
+                                .disabled(selectedCalendarTitle.isEmpty)
+                            Text("Selecting a title does not confirm the report outcome or change the inspection date.").font(.caption)
+                        }
+                        Button("Use calendar candidates as draft facts") { applyCalendar() }
+                    }
                 }
             }
             if !status.isEmpty { Section { Text(status).font(.caption).textSelection(.enabled) } }
@@ -470,6 +482,8 @@ struct InspectionDetail: View {
             do {
                 let data = try await store.api.json("/calendar/extract", object: ["text": inspection.calendar_text])
                 calendarCandidates = try JSONDecoder().decode(CalendarCandidates.self, from: data)
+                let titles = calendarCandidates?.titles ?? []
+                selectedCalendarTitle = titles.contains(inspection.title) ? inspection.title : (titles.count == 1 ? titles[0] : "")
                 // No outcome or drawing approval is inferred.
                 let object = try JSONSerialization.jsonObject(with: data)
                 let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
@@ -483,6 +497,7 @@ struct InspectionDetail: View {
     }
     private func applyCalendar() {
         guard let candidates = calendarCandidates else { return }
+        if !selectedCalendarTitle.isEmpty { inspection.title = selectedCalendarTitle }
         if let value = candidates.fields["project"], calendarFieldMissing(inspection.project) { inspection.project = value }
         if let value = candidates.fields["inspection_date"], calendarFieldMissing(inspection.inspection_date) { inspection.inspection_date = value }
         for item in candidates.equipment {

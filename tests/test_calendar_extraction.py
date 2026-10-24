@@ -81,3 +81,13 @@ Section 3 Scaffold Specific Location
         self.assertNotIn('drawings_approved', value['fields'])
         self.assertEqual(len(value['equipment']), 1)
         self.assertNotIn('status', value['equipment'][0])
+
+    def test_calendar_title_choices_keep_order_and_do_not_infer_outcome(self):
+        first='2026-05-11 PS87Q Supported Scaffold-I-Inspection-OIs'
+        second='2026-05-11 PS87Q Supported Scaffold-I-Inspection-No OIs'
+        other='2026-05-11 PS87Q Fall Protection-II-Inspection-OIs'
+        value=calendar_candidates(first+'\n'+second+'\n'+first+'\n'+other+'\nYYYY-MM-MM Project Product-RMN#-Inspection-OIs')
+        self.assertEqual(value['titles'], [first,second,other])
+        self.assertNotIn('status',value['equipment'][0])
+        self.assertFalse(value['confirmed'])
+        self.assertEqual(calendar_candidates('No subject supplied')['titles'], [])

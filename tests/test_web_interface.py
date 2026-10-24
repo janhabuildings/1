@@ -207,6 +207,30 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.get_by_label('Dunnage type · custom description',exact=True).input_value(), 'Timber pads on sleepers')
         self.assertEqual(self.errors, [])
 
+    def test_multiple_calendar_titles_require_a_choice_and_save_exact_title(self):
+        from playwright.sync_api import expect
+        self.connect()
+        first='2026-05-11 PS87Q Supported Scaffold-I-Inspection-OIs'
+        second='2026-05-11 PS87Q Supported Scaffold-I-Inspection-No OIs'
+        self.page.locator('#calendar_text').fill(first+'\n'+second)
+        self.page.locator('#extract').click()
+        expect(self.page.locator('#calendar-title-options')).to_be_visible()
+        self.assertEqual(self.page.locator('#calendar-title').input_value(), '')
+        self.assertEqual(self.page.locator('#title').input_value(), '')
+        original_date=self.page.locator('#inspection_date').input_value()
+        self.page.locator('#calendar-title').select_option(second)
+        self.page.locator('#use-calendar-title').click()
+        self.assertEqual(self.page.locator('#title').input_value(), second)
+        self.assertEqual(self.page.locator('#inspection_date').input_value(), original_date)
+        self.page.locator('#apply-calendar').click()
+        self.page.locator('[data-tab=reports]').click()
+        self.assertEqual(self.page.get_by_label('Inspection result',exact=True).input_value(), '')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        self.assertEqual(self.app.state.store.list()[0]['title'], second)
+        expect(self.page.locator('#saved option').last).to_contain_text(second)
+        self.assertEqual(self.errors, [])
+
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
         self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nRequested by:\tExample Contact\nExample Company\nAddress:\t123 Example Street\nPermit#:\tM00981443-I1 SF\nPE Drawings on site?\tYes | NA | No\nInspected on:\n10/15/2026\nM00981443-I1 SF')

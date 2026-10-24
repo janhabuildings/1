@@ -174,7 +174,15 @@ def calendar_candidates(text):
             if types == {key} and re.fullmatch(r'[A-Z0-9][A-Z0-9-]*', result['permit'], re.I):
                 item['permit'] = result['permit']
         if len(item)>1: equipment.append(item)
-    return {'fields':result,'equipment':equipment,'confirmed':False,
+    titles = []
+    for line in text.splitlines():
+        title = re.sub(r'\s+', ' ', line).strip()
+        match = re.fullmatch(r'(\d{4}-\d{2}-\d{2}) .+?-[IVXLCDM\d]+-Inspection-(?:No\s+OIs|OIs)', title, re.I)
+        if not match: continue
+        try: date.fromisoformat(match.group(1))
+        except ValueError: continue
+        if title not in titles: titles.append(title)
+    return {'fields':result,'equipment':equipment,'titles':titles,'confirmed':False,
             'notice':'Calendar template alternatives are not inspection results. Confirm all candidates.'}
 
 

@@ -122,7 +122,7 @@ struct AISuggestionSet: Decodable {
 }
 struct AISuggestionResponse: Decodable { var suggestions: AISuggestionSet }
 
-struct CalendarCandidates: Decodable { var fields: [String: String]; var equipment: [[String: String]] }
+struct CalendarCandidates: Decodable { var fields: [String: String]; var equipment: [[String: String]]; var titles: [String]? }
 
 struct SuggestedCitation: Decodable, Identifiable {
     var id: String { reference_id + quote }
