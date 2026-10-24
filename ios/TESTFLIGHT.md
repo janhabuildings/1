@@ -1,5 +1,7 @@
 # TestFlight setup without owning a Mac
 
+**Release hold — October 24, 2026:** The user requested no further uploads to App Store Connect until they explicitly ask. Continue development and simulator checks, but do not dispatch `ios-testflight.yml` or run the upload script without that instruction. Latest uploaded build before this hold: 0.1.0 (16.1).
+
 The app compiles on GitHub's macOS runners using the explicitly selected Xcode 26.3 toolchain, satisfying Apple's iOS 26 SDK upload requirement. The manual **Release iPhone app to TestFlight** workflow signs, archives and uploads it after the following account configuration. Enrollment alone does not supply signing credentials. No Apple credentials are in this repository. The first signed upload succeeded as version **0.1.0 (7.1)** in [release run 39894869625](https://github.com/janhabuildings/1/actions/runs/39894869625). Apple processing and installation on a physical device have not been verified.
 
 ## 1. Create the Apple app identity

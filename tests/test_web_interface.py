@@ -231,6 +231,34 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#saved option').last).to_contain_text(second)
         self.assertEqual(self.errors, [])
 
+    def test_extraction_populates_fields_without_apply_and_survives_save_reload(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.locator('#client').fill('Inspector confirmed client')
+        self.page.locator('#inspection_date').fill('2026-10-24')
+        title='2026-05-11 PS87Q Supported Scaffold-I-Inspection-OIs'
+        self.page.locator('#calendar_text').fill(title+'\nClient:\tCalendar client\tProject:\tPS87Q\nRequest date:\t05.06.2026\tInspected on:\t05.11.2026\tRequest by:\tExample Contact\nExample Company\nPermit#:\tQ01248704\nAddress:\t67-54 80 Street Qns NY')
+        self.page.locator('#extract').click()
+        expect(self.page.locator('#project')).to_have_value('PS87Q')
+        expect(self.page.locator('#extract')).to_be_enabled()
+        self.assertEqual(self.page.locator('#title').input_value(),title)
+        self.assertEqual(self.page.locator('#requested_by').input_value(),'Example Contact Example Company')
+        self.assertEqual(self.page.locator('#address').input_value(),'67-54 80 Street Qns NY')
+        self.assertEqual(self.page.locator('#client').input_value(),'Inspector confirmed client')
+        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-24')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        saved=self.app.state.store.list()[0]
+        record=self.app.state.store.get(saved['id'])
+        self.assertEqual(record['reports'][0]['permit'],'Q01248704')
+        self.page.reload()
+        self.connect()
+        self.page.locator('#saved').select_option(saved['id'])
+        expect(self.page.locator('#requested_by')).to_have_value('Example Contact Example Company')
+        self.assertEqual(self.page.locator('#title').input_value(),title)
+        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-24')
+        self.assertEqual(self.errors, [])
+
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
         self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nRequested by:\tExample Contact\nExample Company\nAddress:\t123 Example Street\nPermit#:\tM00981443-I1 SF\nPE Drawings on site?\tYes | NA | No\nInspected on:\n10/15/2026\nM00981443-I1 SF')

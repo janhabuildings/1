@@ -192,17 +192,8 @@ struct InspectionDetail: View {
             if !suggestions.isEmpty {
                 Section("Candidates and analysis details") {
                     Text(suggestions).font(.caption).textSelection(.enabled)
-                    if let candidates = calendarCandidates {
-                        if let titles = candidates.titles, !titles.isEmpty {
-                            Picker("Inspection title from calendar", selection: $selectedCalendarTitle) {
-                                Text("Choose a title…").tag("")
-                                ForEach(titles, id: \.self) { title in Text(title).tag(title) }
-                            }.pickerStyle(.menu)
-                            Button("Use selected inspection title") { inspection.title = selectedCalendarTitle }
-                                .disabled(selectedCalendarTitle.isEmpty)
-                            Text("Selecting a title does not confirm the report outcome or change the inspection date.").font(.caption)
-                        }
-                        Button("Use calendar candidates as draft facts") { applyCalendar() }
+                    if calendarCandidates != nil {
+                        Button("Fill missing fields again") { applyCalendar() }
                     }
                 }
             }
@@ -302,6 +293,16 @@ struct InspectionDetail: View {
             Text("Paste the complete calendar entry below.").font(.caption)
             TextEditor(text: $inspection.calendar_text).frame(minHeight: 140).accessibilityLabel("Calendar content")
             Button("Extract calendar candidates") { extract() }.disabled(busy)
+            if let titles = calendarCandidates?.titles, !titles.isEmpty {
+                Picker("Inspection title from calendar", selection: $selectedCalendarTitle) {
+                    Text("Choose a title…").tag("")
+                    ForEach(titles, id: \.self) { title in Text(title).tag(title) }
+                }.pickerStyle(.menu)
+                    .onChange(of: selectedCalendarTitle) { _, title in
+                        if !title.isEmpty { inspection.title = title; store.save(inspection) }
+                    }
+                Text("Choose a title when several are listed. Report outcome and inspection date are confirmed separately.").font(.caption)
+            }
         }
     }
     private var capture: some View {
@@ -488,14 +489,17 @@ struct InspectionDetail: View {
                 let object = try JSONSerialization.jsonObject(with: data)
                 let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
                 suggestions = String(data: pretty, encoding: .utf8) ?? ""
-                status = "Calendar candidates extracted. Confirm the values in each report; no inspection outcome was inferred."
+                applyCalendar(clearCandidates: false)
+                store.save(inspection)
+                scheduleSync()
+                status = "Calendar details filled and saved on this phone. Review the fields and choose a title if several are listed. Existing facts and inspection date were kept."
             } catch { store.error = error.localizedDescription }
         }
     }
     private func calendarFieldMissing(_ value: String) -> Bool {
         ["", "[pending confirmation]", "pending", "tbd"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
     }
-    private func applyCalendar() {
+    private func applyCalendar(clearCandidates: Bool = true) {
         guard let candidates = calendarCandidates else { return }
         if !selectedCalendarTitle.isEmpty { inspection.title = selectedCalendarTitle }
         if let value = candidates.fields["project"], calendarFieldMissing(inspection.project) { inspection.project = value }
@@ -519,7 +523,9 @@ struct InspectionDetail: View {
                 if calendarFieldMissing(inspection.reports[index].subject_project) { inspection.reports[index].subject_project = item["subject_project"] ?? "" }
             }
         }
-        calendarCandidates = nil; status = "Calendar candidates added to missing fields. Existing facts and inspection date kept. Review dates, result and drawing status."
+        if clearCandidates { calendarCandidates = nil }
+        store.save(inspection)
+        status = "Calendar details filled and saved. Review dates, result and drawing status."
     }
     private func analyze() {
         suggestedFindings = []; analysisChecks = []
