@@ -11,3 +11,10 @@ plugins/dseny-inspections/checksums.json
 *.sqlite3-*
 ios/**/xcuserdata/
 ios/**/DerivedData/
+
+# Operator font binaries stay private; Render secret files install them at startup.
+backend/fonts/*.ttf
+backend/fonts/*.otf
+backend/fonts/*.rtf
+backend/fonts/*.zip
+backend/fonts/*.base64

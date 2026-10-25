@@ -133,6 +133,8 @@ class ExportInput(BaseModel):
 
 def create_app(settings=None):
     settings=settings or Settings.from_env()
+    from backend.font_assets import configure_private_fonts
+    report_fonts=configure_private_fonts()
     store=Store(settings.data_dir)
     from backend.templates import TemplateManager, sample_report
     templates=TemplateManager(store)
@@ -177,7 +179,7 @@ def create_app(settings=None):
     def capabilities():
         return {'cloud_ai_configured':bool(settings.ai_key),'semantic_search_configured':bool(settings.ai_key),
                 'gmail_direct_drafting':False,'system_mail_composer':True,
-                'phone_or_whatsapp_call_capture':False,'rendering_requires_review':True}
+                'phone_or_whatsapp_call_capture':False,'rendering_requires_review':True,'report_fonts':report_fonts}
 
     @app.get('/inspections',dependencies=[Depends(authorized)])
     def list_inspections(): return store.list()
