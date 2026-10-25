@@ -87,3 +87,5 @@ Report facts includes a Shed / Scaffold / Other selector, available while editin
 Open items also has a Suggested corrective actions checklist, filtered to the scaffold/shed template options. Multiple selected actions appear on separate lines in one action cell; semicolons inside action wording are retained. Use Edit corrective action wording for final changes and separate open items for different locations. Other reports allow custom actions.
 
 The report-type selector changes the current report's type while retaining its fields. It opens an existing report instead when that target type is already present. Separate Add report buttons on the inspection page remain the explicit way to create additional equipment reports. App Store Connect uploads remain on hold until requested.
+
+Reports now use the October 25, 2026 master’s styles and CCI wording. No OIs output subjects/filenames use PE CERT OF USE; the stored outcome remains No OIs. Backend formatting applies to newly generated reports without an iPhone app update. Bundled action/company suggestions were refreshed from the new master for the next authorized app build. App Store Connect uploads remain on hold.

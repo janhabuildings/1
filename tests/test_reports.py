@@ -28,7 +28,7 @@ class Reports(unittest.TestCase):
                     self.assertEqual(doc.tables[3].cell(0,0).text,Document(master).tables[3].cell(0,0).text)
                     if status=='OIs':
                         self.assertIn(d['open_items'][0]['action'],text)
-                        self.assertEqual(len(doc.tables[4].rows), 3 if equipment=='SF' else 4)
+                        self.assertEqual(len(doc.tables[4].rows),3)
                     with ZipFile(master) as a, ZipFile(out) as b:
                         self.assertEqual(a.namelist(),b.namelist())
                         for name in a.namelist():

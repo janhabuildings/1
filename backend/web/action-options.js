@@ -11,9 +11,7 @@ const actionSuggestions = {
     "Partially planked levels- Remove or complete planking level.",
     "Wall tie ends (protruding hazards)- Pad all tie ends.",
     "Top level: Install diagonal horizontal pipe & clamp from façade to façade across corners (4).",
-    "Install shoring post below SHED or SCAFFOLD legs which bear on areaway grating.",
-    "Install vertical plywood at two sides",
-    "Extend the wire mesh two bays beyond exposed area"
+    "Install shoring post below SHED or SCAFFOLD legs which bear on areaway grating."
   ],
   "SH": [
     "Catchall panels: Ensure all catchall panels have no warping; replace any warped (curling) catchall panels,",
@@ -27,8 +25,7 @@ const actionSuggestions = {
     "Deck plank- Sister or replace all deteriorated deck planks.",
     "Clear debris (leaves) from top of shed to reduce deterioration of timber components.",
     "Driveway junior to main beam connections: Install flange beam clamp 'stops' at top of main beam, bumpered tight to outer junior beam joist.",
-    "Install shoring post below SHED or SCAFFOLD legs which bear on areaway grating.",
-    "Replace all such mudsills."
+    "Install shoring post below SHED or SCAFFOLD legs which bear on areaway grating."
   ],
   "OT": []
 };

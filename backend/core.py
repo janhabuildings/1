@@ -164,7 +164,7 @@ def calendar_candidates(text):
             value = ' '.join(selected)
         if value.casefold() in ('[pending confirmation]', 'pending', 'tbd', 'yes/no', 'yes / no'): continue
         result[field] = value
-    patterns={'SH':r'Sidewalk Shed-([IVXLCDM\d]+)-Inspection-', 'SF':r'Supported Scaffold-([IVXLCDM\d]+)-Inspection-'}
+    patterns={'SH':r'Sidewalk Shed\s*-\s*([IVXLCDM\d]+)\s*-\s*Inspection\s*-\s*', 'SF':r'Supported Scaffold\s*-\s*([IVXLCDM\d]+)\s*-\s*Inspection\s*-\s*'}
     types = {k for k, p in patterns.items() if re.search(p, text, re.I)}
     if 'permit' in result and (len(types) > 1 or not re.fullmatch(r'[A-Z0-9][A-Z0-9-]*', result['permit'], re.I)):
         result.pop('permit')
@@ -182,7 +182,7 @@ def calendar_candidates(text):
                 item['permit'] = result['permit']
         if len(item)>1: equipment.append(item)
     if not result.get('project'):
-        projects = {m.group(1).strip() for m in re.finditer(r'^\d{4}-\d{2}-\d{2} (.+?) (?:Supported Scaffold|Sidewalk Shed|Fall Protection|SOE|Fence)-[IVXLCDM\d]+-Inspection-(?:No\s+OIs|OIs)\s*$', text, re.I|re.M)}
+        projects = {m.group(1).strip() for m in re.finditer(r'^\d{4}-\d{2}-\d{2} (.+?) (?:Supported Scaffold|Sidewalk Shed|Fall Protection|SOE|Fence)-[IVXLCDM\d]+-Inspection-(?:No\s+OIs|OIs|PE\s+CERT\s+OF\s+USE)\s*$', text, re.I|re.M)}
         if len(projects)==1: result['project']=next(iter(projects))
     from backend.calendar_facts import report_subjects
     subjects=report_subjects(text)

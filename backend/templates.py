@@ -57,11 +57,12 @@ def inspect(content,mode,mapping,slot,*,builtin=False):
         try:
             doc=Document(BytesIO(content))
             # Exercise the positional mapping before accepting layout-compatible revisions.
-            if len(doc.tables)!=(6 if slot.startswith('OT') or slot.endswith('-OIs') else 4): raise ValueError()
+            if len(doc.tables) not in ((6,) if slot.endswith('-OIs') else (4,5,6)): raise ValueError()
             if slot.startswith('OT'):
                 site_headings=[' '.join(r.cells[0].text.split()) for r in doc.tables[3].rows]
                 item_headings=[' '.join(r.cells[0].text.split()) for r in doc.tables[4].rows]
-                if 'Section 3 Location' not in site_headings or 'Section 4 Open Items' not in item_headings: raise ValueError()
+                if 'Section 3 Location' not in site_headings: raise ValueError()
+                if slot.endswith('-OIs') and 'Section 4 Open Items' not in item_headings: raise ValueError()
             site_rows=len(doc.tables[3].rows)
             if slot.startswith('SF') and site_rows<6: raise ValueError()
             if slot.startswith('SH') and site_rows!=3: raise ValueError()
@@ -97,16 +98,24 @@ class TemplateManager:
             ''')
         for slot in SLOTS:
             variant='N-Ois' if slot.endswith('-No OIs') else 'Ois'
-            source=ROOT/'templates'/('New Template Full.docx' if slot.startswith('OT') else f'New Template {slot[:2]}-{variant}.docx')
-            identity='builtin-'+slot
+            source=ROOT/'templates'/f'New Template {slot[:2]}-{variant}.docx'
+            content=source.read_bytes();digest=hashlib.sha256(content).hexdigest()
+            base='builtin-'+slot
             with store.connect() as db:
-                exists=db.execute('SELECT id FROM template_versions WHERE id=?',(identity,)).fetchone()
-            if not exists:
-                content=source.read_bytes();self._write(identity,content)
+                exists=db.execute('SELECT * FROM template_versions WHERE id=?',(base,)).fetchone()
+            identity=base if not exists or exists['sha256']==digest else base+'-'+digest[:12]
+            with store.connect() as db:
+                current=db.execute('SELECT id FROM template_versions WHERE id=?',(identity,)).fetchone()
+            if not current:
+                self._write(identity,content)
                 with store.connect() as db:
                     db.execute('INSERT OR IGNORE INTO template_versions VALUES (?,?,?,?,?,?,?,?,?)',
-                        (identity,slot,'Original DSENY template','legacy','{}',hashlib.sha256(content).hexdigest(),self.now(),1,0))
-                    db.execute('INSERT OR IGNORE INTO template_active VALUES (?,?)',(slot,identity))
+                        (identity,slot,'DSENY full template · 2026-10-25','legacy','{}',digest,self.now(),1,0))
+            with store.connect() as db:
+                active=db.execute('SELECT v.builtin FROM template_active a JOIN template_versions v ON v.id=a.version_id WHERE a.slot=?',(slot,)).fetchone()
+                # Update bundled defaults without overwriting a user-activated custom version.
+                if active is None or active['builtin']:
+                    db.execute('INSERT INTO template_active VALUES (?,?) ON CONFLICT(slot) DO UPDATE SET version_id=excluded.version_id',(slot,identity))
 
     @staticmethod
     def now(): return datetime.now(timezone.utc).isoformat()

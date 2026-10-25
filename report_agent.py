@@ -67,6 +67,9 @@ def separate_sections(doc):
         section=next((p._p for p in doc.paragraphs if p.text.strip().startswith("Section 4")),None)
         if section is not None: targets.append(section)
     for target in targets:
+        # A new page already separates Section 3 from the preceding table.
+        previous=target.getprevious()
+        if previous is not None and previous.find('.//'+W+'pageBreakBefore') is not None: continue
         for _ in range(2):
             paragraph=etree.Element(W+'p');props=etree.SubElement(paragraph,W+'pPr')
             spacing=etree.SubElement(props,W+'spacing')
@@ -235,29 +238,50 @@ def compact_no_ois_layout(doc):
     for paragraph in list(doc.paragraphs):
         if not paragraph.text.strip() and not paragraph._p.xpath('.//w:drawing | .//w:pict | .//w:object'):
             paragraph._p.getparent().remove(paragraph._p)
-    # Compact only oversized labels/dates in narrow Section 1 cells.
-    table=doc.tables[1]
-    for row_index,cols in ((2,range(6)),(3,(0,)),(4,(0,1))):
-        for col in cols:
-            for paragraph in physical_cells(table.rows[row_index])[col].paragraphs:
-                for run in paragraph.runs: run.font.size=Pt(10)
-    for paragraph in doc.paragraphs:
-        if '347-730-6990' in paragraph.text:
-            for run in paragraph.runs:run.font.size=Pt(10)
-    # The complete scaffold table has extra hoist/chute rows; keep the small
-    # specification text readable while leaving room for the full conclusion.
-    for row in doc.tables[3].rows:
-        for cell in physical_cells(row):
-            for paragraph in cell.paragraphs:
-                paragraph.paragraph_format.space_after=Pt(0)
+    revised=doc.core_properties.identifier=="DSENY-2026-10-25"
+    # Compact only legacy oversized labels/dates; new master typography is authoritative.
+    if not revised:
+        table=doc.tables[1]
+        for row_index,cols in ((2,range(6)),(3,(0,)),(4,(0,1))):
+            for col in cols:
+                for paragraph in physical_cells(table.rows[row_index])[col].paragraphs:
+                    for run in paragraph.runs: run.font.size=Pt(10)
+        for paragraph in doc.paragraphs:
+            if '347-730-6990' in paragraph.text:
                 for run in paragraph.runs:run.font.size=Pt(10)
-    in_conclusion=False
-    for paragraph in doc.paragraphs:
-        if paragraph.text.strip().startswith('Section 4'):in_conclusion=True
-        if in_conclusion:
-            paragraph.paragraph_format.space_after=Pt(0)
-            paragraph.paragraph_format.line_spacing=1.0
-            for run in paragraph.runs:run.font.size=Pt(10)
+        # The complete scaffold table has extra hoist/chute rows; keep the small
+        # specification text readable while leaving room for the full conclusion.
+        for row in doc.tables[3].rows:
+            for cell in physical_cells(row):
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.space_after=Pt(0)
+                    for run in paragraph.runs:run.font.size=Pt(10)
+        in_conclusion=False
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip().startswith('Section 4'):in_conclusion=True
+            if in_conclusion:
+                paragraph.paragraph_format.space_after=Pt(0)
+                paragraph.paragraph_format.line_spacing=1.0
+                for run in paragraph.runs:run.font.size=Pt(10)
+    if revised:
+        # Preserve master font sizes/colors; remove inherited paragraph padding
+        # in the certificate body to keep the established compact page layout.
+        children=list(doc._element.body)
+        boundary=children.index(doc.tables[4]._element)
+        for paragraph in doc.paragraphs:
+            if children.index(paragraph._p)>boundary:
+                paragraph.paragraph_format.space_before=Pt(0)
+                paragraph.paragraph_format.space_after=Pt(0)
+                paragraph.paragraph_format.line_spacing=1.0
+                if paragraph._p.xpath('./w:pPr/w:numPr'):
+                    paragraph.paragraph_format.left_indent=Inches(0.15)
+                    paragraph.paragraph_format.first_line_indent=Inches(-0.1)
+        for row in doc.tables[3].rows:
+            for cell in physical_cells(row):
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.space_before=Pt(0)
+                    paragraph.paragraph_format.space_after=Pt(0)
+                    paragraph.paragraph_format.line_spacing=1.0
     # Sections 1 and 2 stay together on page one. Section 3 begins page two.
     page=etree.Element(W+'p');props=etree.SubElement(page,W+'pPr')
     etree.SubElement(props,W+'pageBreakBefore')
@@ -269,6 +293,11 @@ def no_ois_narrative(source=None):
     """Copy the user's original No OIs wording and run formatting, without instructions."""
     original=Document(source or ROOT/'templates/New Template Full.docx')
     paragraphs=original.paragraphs
+    if len(original.tables)>=14:
+        return [deepcopy(original.tables[4].cell(0,0).paragraphs[0]._p)] + [deepcopy(p._p) for p in original.tables[11].cell(0,0).paragraphs[4:19] if p.text.strip()]
+    if len(original.tables)==5 and 'CERTIFICATE OF COMPLETED INSTALLATION' in original.tables[4].cell(0,0).text:
+        children=list(original._element.body);boundary=children.index(original.tables[4]._element)
+        return [deepcopy(original.tables[4].cell(0,0).paragraphs[0]._p)] + [deepcopy(p._p) for p in paragraphs if children.index(p._p)>boundary and p.text.strip()]
     start=next(i for i,p in enumerate(paragraphs) if p.text.strip()=='Section 4')
     end=next(i for i in range(start,len(paragraphs)) if paragraphs[i].text.startswith('DSENY adheres'))
     return [deepcopy(p._p) for p in paragraphs[start:end+1]
@@ -296,14 +325,14 @@ def space_report_title(doc):
 def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None, reserve_signature=False):
     validate(data, draft=draft)
     variant = 'Ois' if data['status'] == 'OIs' else 'N-Ois'
-    source = ROOT / 'templates' / ('New Template Full.docx' if data['equipment']=='OT' else f'New Template {data["equipment"]}-{variant}.docx')
+    source = ROOT / 'templates' / f'New Template {data["equipment"]}-{variant}.docx'
     if template is not None: source=Path(template)
     if template_mode == "placeholders":
         return fill_placeholders(data,output,source,mapping or {},reserve_signature)
     if template_mode != "legacy": raise ValueError("Unsupported template mode")
     doc = Document(source)
     strip_example_stamp_nodes(doc._element,example_stamp_rel_ids(doc))
-    if data['equipment']=='OT': prepare_other_layout(doc,data)
+    if data['equipment']=='OT' and len(doc.tables)>3 and sum('Section 3' in r.cells[0].text for r in doc.tables[3].rows)>1: prepare_other_layout(doc,data)
     for paragraph in doc.paragraphs:
         if '347-730-6990' in paragraph.text:
             props=paragraph._p.get_or_add_pPr();indent=props.find(W+'ind')
@@ -347,7 +376,8 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         # Reuse the original scaffold master rows for the full hoist/chute fields.
         if len(site.rows) <= loc_index+5:
             master = Document(ROOT/'templates/New Template SF-Ois.docx').tables[3]
-            for row in list(master.rows)[7:13]: site._tbl.append(deepcopy(row._tr))
+            extra_start=next(i for i,row in enumerate(master.rows) if physical_cells(row)[0].text.strip()=='Hoist Inspected?')
+            for row in list(master.rows)[extra_start:extra_start+6]: site._tbl.append(deepcopy(row._tr))
         extras = [('hoist_inspected',1),('chute_inspected',1),('hoist_locations',1),
                   ('hoist_height',1),('chute_locations',1),('chute_height',1)]
         for offset,(key,col) in enumerate(extras,loc_index+5):
@@ -357,13 +387,17 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         for offset,key in ((loc_index+8,'hoist_model'),(loc_index+10,'chute_model')):
             flag = 'hoist_inspected' if key.startswith('hoist') else 'chute_inspected'
             replace_cell(physical_cells(site.rows[offset])[3],measures.get(key) or ('NA' if measures.get(flag) in ('No','NA') else '[Pending confirmation]'))
+    if data['equipment']=='SF' and data['status']=='No OIs' and doc.core_properties.identifier=='DSENY-2026-10-25':
+        # The master's preparation instructions remove unused equipment rows.
+        for offset,kind in sorted([(loc_index+7,'hoist'),(loc_index+8,'hoist'),(loc_index+9,'chute'),(loc_index+10,'chute')],reverse=True):
+            if measures.get(kind+'_inspected') in ('No','NA'):site._tbl.remove(site.rows[offset]._tr)
     if data['status'] == 'OIs':
         t = doc.tables[4]
         start = next(i for i,row in enumerate(t.rows) if row.cells[0].text.strip() == 'Number') + 1
         set_rows(t, start, [(str(i), item['location'], item['action']) for i,item in enumerate(data['open_items'],1)])
         for row in doc.tables[5].rows:
             replace_cell(row.cells[1], '')
-    elif data['equipment']=='OT':
+    elif data['equipment']=='OT' and len(doc.tables)==6:
         t=doc.tables[4]
         for paragraph in no_ois_narrative(source):t._element.addprevious(paragraph)
         doc.tables[5]._element.getparent().remove(doc.tables[5]._element)
@@ -406,7 +440,8 @@ def product(data):
 
 
 def subject(data):
-    return f'{data["inspection_date"]} {data["project"]} {product(data)}-{data["inspection_code"]}-Inspection-{data["status"]}'
+    suffix='PE CERT OF USE' if data['status']=='No OIs' else data['status']
+    return f'{data["inspection_date"]} {data["project"]} {product(data)}-{data["inspection_code"]}-Inspection-{suffix}'
 
 
 def convert(docx, directory, kind):

@@ -41,7 +41,7 @@ class OtherReports(unittest.TestCase):
                     self.assertIn('There was no accumulation of heavy debris on scaffold or sheds.',text)
                     self.assertNotIn('subject to final review and acceptance',text)
                     self.assertNotIn('No open items were reported',text)
-                    self.assertEqual(len(doc.tables),4)
+                    self.assertEqual(len(doc.tables),5)
                     self.assertNotIn('Section 5',text)
                 with ZipFile(source) as a,ZipFile(path) as b:
                     for name in a.namelist():
@@ -89,7 +89,7 @@ class NoOIsNarrative(unittest.TestCase):
             data=sample_report('OT-No OIs');path=Path(directory)/'shoring.docx'
             report_agent.fill_report(data,path,draft=True);doc=Document(path)
             expected=[''.join(t.text or '' for t in node.iter(report_agent.W+'t')) for node in report_agent.no_ois_narrative()]
-            actual=[p.text for p in doc.paragraphs]
+            actual=[p.text for p in doc.paragraphs]+[p.text for t in doc.tables for row in t.rows for c in report_agent.physical_cells(row) for p in c.paragraphs]
             for text in expected:
                 if text.strip():self.assertIn(text,actual)
             title=next(p._p for p in doc.paragraphs if p.text.startswith('Title:'))

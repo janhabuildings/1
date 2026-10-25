@@ -45,7 +45,8 @@ class CellMapping(unittest.TestCase):
                     self.assertEqual(cells(table.rows[6])[1].text,'Yes')
                     for section in doc.tables[2:5]:
                         previous=section._element.getprevious();self.assertEqual(previous.tag,report_agent.W+'p')
-                        self.assertEqual(previous.getprevious().tag,report_agent.W+'p')
+                        if previous.find('.//'+report_agent.W+'pageBreakBefore') is None:
+                            self.assertEqual(previous.getprevious().tag,report_agent.W+'p')
                     if status=='OIs':
                         number=doc.tables[4].rows[-1].cells[0]
                         self.assertEqual(number.text,'1')
@@ -127,7 +128,7 @@ class LifecycleAndStamp(unittest.TestCase):
             self.assertIn('Section 3',' '.join(reader.pages[1].extract_text().split()))
             self.assertIn('DSENY adheres',reader.pages[1].extract_text())
             self.assertIn('PE signature/seal:',reader.pages[1].extract_text())
-            if equipment=='SF':self.assertIn('Hoist Model',reader.pages[1].extract_text())
+            if equipment=='SF':self.assertIn('Hoist Inspected?',reader.pages[1].extract_text())
             eml=next(a for a in generated['artifacts'] if a['filename'].endswith('.eml'))
             message=BytesParser(policy=policy.default).parsebytes(self.client.get('/artifacts/'+eml['id'],headers=HEADERS).content)
             self.assertEqual(str(message['From']),'inspector@example.com')

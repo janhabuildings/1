@@ -121,3 +121,11 @@ Section 3 Scaffold Specific Location
         self.assertNotIn('status',str(value['equipment']))
         self.assertNotIn('locations',value['equipment'][0])
         self.assertFalse(value['confirmed'])
+
+    def test_pe_cert_of_use_subject_is_a_title_choice_not_a_confirmed_result(self):
+        text='2026-10-25 PS87Q Supported Scaffold-I-Inspection - PE CERT OF USE'
+        result=calendar_candidates(text)
+        self.assertEqual(result['titles'],[text])
+        self.assertEqual(result['equipment'][0]['inspection_code'],'I')
+        self.assertFalse(result['confirmed'])
+        self.assertNotIn('status',result['equipment'][0])

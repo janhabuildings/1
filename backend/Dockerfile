@@ -9,6 +9,8 @@ RUN --mount=type=secret,id=build_ca,mode=0444 \
     if [ -s /run/secrets/build_ca ]; then export PIP_CERT=/run/secrets/build_ca; fi; \
     pip install --no-cache-dir -r backend/requirements.txt
 COPY backend /app/backend
+COPY backend/fonts /usr/local/share/fonts/jbi
+RUN fc-cache -f
 COPY report_agent.py requirements.txt /app/
 COPY templates /app/templates
 COPY plugins /app/plugins

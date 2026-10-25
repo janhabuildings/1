@@ -230,7 +230,7 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
                       next(a['name'] for a in data['attendees'] if reports.is_pe(a['title'])))
                 if data['equipment']=='OT':
                     body='Dear Client,\n\nPlease see the attached inspection review draft for '+reports.product(data)+'. No open items were reported for the inspected locations. Review scope and findings before delivery.\n\nRegards,\n'+next(a['name'] for a in data['attendees'] if reports.is_pe(a['title']))
-                content='<html><body>'+''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in body.split('\n\n'))+'</body></html>'
+                content='<html><body style="font-family:Aptos,Calibri,sans-serif;font-size:12pt;color:#000000">'+''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in body.split('\n\n'))+'</body></html>'
                 html_file=folder/(safe+' - Cover.html');html_file.write_text(content)
                 entry['html_file']=str(html_file)
             msg=EmailMessage(policy=SMTP)

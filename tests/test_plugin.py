@@ -101,7 +101,7 @@ class PluginPackage(unittest.TestCase):
             self.assertEqual(app['apps']['gmail']['id'],'connector_2128aebfecb84f64a069897515042a44')
             checks=json.loads((plugin/'checksums.json').read_text())
             for name,digest in checks.items(): self.assertEqual(hashlib.sha256((plugin/name).read_bytes()).hexdigest(),digest)
-            self.assertEqual(len(list((plugin/'runtime/templates').glob('*.docx'))),5)
+            self.assertEqual(len(list((plugin/'runtime/templates').glob('*.docx'))),7)
             if not OFFICE.exists(): self.skipTest('LibreOffice not available for extracted runtime integration')
             env=dict(os.environ,DSENY_OFFICE_BIN=str(OFFICE))
             output=root/'state/out'

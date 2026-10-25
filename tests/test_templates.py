@@ -29,6 +29,22 @@ def placeholder_doc(alias=False):
 
 
 class TemplateEngine(unittest.TestCase):
+    def test_bundled_template_updates_keep_history_and_custom_activation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory);manager=TemplateManager(store);identity='builtin-SF-OIs'
+            record=manager.get(identity);original=Path(record['path']).read_bytes()
+            document=Document(BytesIO(original));document.tables[0].cell(0,0).paragraphs[0].add_run('LEGACY')
+            stream=BytesIO();document.save(stream);legacy=stream.getvalue();digest=hashlib.sha256(legacy).hexdigest()
+            manager._write(identity,legacy)
+            with store.connect() as db:db.execute('UPDATE template_versions SET sha256=? WHERE id=?',(digest,identity))
+            updated=TemplateManager(store);active=updated.active()['SF-OIs']
+            self.assertNotEqual(active['id'],identity)
+            self.assertEqual(Path(updated.get(identity)['path']).read_bytes(),legacy)
+            self.assertEqual(active['sha256'],hashlib.sha256(original).hexdigest())
+            custom=updated.add(placeholder_doc(),'SF-OIs','Custom active','placeholders',{})
+            with store.connect() as db:db.execute('UPDATE template_active SET version_id=? WHERE slot=?',(custom['id'],'SF-OIs'))
+            self.assertEqual(TemplateManager(store).active()['SF-OIs']['id'],custom['id'])
+
     def test_split_runs_headers_multiline_and_untouched_parts(self):
         with tempfile.TemporaryDirectory() as directory:
             p=Path(directory);source=p/'template.docx';source.write_bytes(placeholder_doc())

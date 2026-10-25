@@ -59,8 +59,8 @@ def apply(pdf,asset):
     if len(writer.pages)<2:writer.add_blank_page(width=float(first.mediabox.width),height=float(first.mediabox.height))
     page=writer.pages[1];width=float(page.mediabox.width);height=float(page.mediabox.height)
     buffer=BytesIO();canvas=Canvas(buffer,pagesize=(width,height))
-    canvas.drawImage(ImageReader(asset['path']),width-235,height-260,width=180,height=144,preserveAspectRatio=True,anchor='c',mask='auto')
-    canvas.setFont('Helvetica',8);canvas.drawRightString(width-55,height-270,'PE signature/seal: '+asset['owner'])
+    canvas.drawImage(ImageReader(asset['path']),width-235,height-214,width=180,height=144,preserveAspectRatio=True,anchor='c',mask='auto')
+    canvas.setFont('Helvetica',8);canvas.drawRightString(width-55,height-224,'PE signature/seal: '+asset['owner'])
     canvas.save();buffer.seek(0);page.merge_page(PdfReader(buffer).pages[0],over=False)
     output=pdf.with_suffix('.stamping.tmp')
     with output.open('wb') as stream:writer.write(stream)
@@ -88,7 +88,7 @@ def apply_docx(docx,asset):
     anchor=OxmlElement('wp:anchor')
     for key,value in {'distT':'0','distB':'0','distL':'0','distR':'0','simplePos':'0','relativeHeight':'0','behindDoc':'1','locked':'0','layoutInCell':'0','allowOverlap':'1'}.items():anchor.set(key,value)
     simple=OxmlElement('wp:simplePos');simple.set('x','0');simple.set('y','0');anchor.append(simple)
-    for axis,offset in [('H',doc.sections[0].page_width.pt-235+(180-width)/2),('V',116+(144-height)/2)]:
+    for axis,offset in [('H',doc.sections[0].page_width.pt-235+(180-width)/2),('V',70+(144-height)/2)]:
         position=OxmlElement('wp:position'+axis);position.set('relativeFrom','page')
         amount=OxmlElement('wp:posOffset');amount.text=str(int(Pt(offset)));position.append(amount);anchor.append(position)
     anchor.append(deepcopy(inline.extent))

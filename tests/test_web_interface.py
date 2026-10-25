@@ -186,7 +186,7 @@ class WebWorkflow(unittest.TestCase):
         from tests.test_templates import placeholder_doc
         self.connect()
         self.page.locator('[data-tab=templates]').click()
-        expect(self.page.locator('#template-versions')).to_contain_text('Original DSENY template')
+        expect(self.page.locator('#template-versions')).to_contain_text('DSENY full template · 2026-10-25')
         self.page.locator('#template-mode').select_option('placeholders')
         self.page.locator('#template-label').fill('Browser template')
         source=Path(self.temp.name)/'browser-template.docx';source.write_bytes(placeholder_doc(alias=True))

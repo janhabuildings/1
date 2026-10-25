@@ -2,7 +2,7 @@ import SwiftUI
 
 enum AttendeeOptions {
     static let roles = ["Competent Person/Site Supervisor", "Safety Inspector", "Competent Person/ Equipment Installation Supervisor", "Competent Person", "GC’s Project Manager", "CM’s Representative", "Owner’s Representative", "PE"]
-    static let companies = ["NYC SCA", "DSENY Engineering Services PC", "WCC"]
+    static let companies = ["NYC SCA", "DSENY Engineering Services PC"]
 }
 
 struct ReportFactsEditor: View {

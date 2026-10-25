@@ -53,7 +53,7 @@ function switchReport(equipment){
   current.equipment=equipment;state.activeReport=equipment;hydrateCalendarReport(current);renderReports();markDirty();
 }
 const attendeeRoles=['Competent Person/Site Supervisor','Safety Inspector','Competent Person/ Equipment Installation Supervisor','Competent Person','GC’s Project Manager','CM’s Representative','Owner’s Representative','PE'];
-const attendeeCompanies=['NYC SCA','DSENY Engineering Services PC','WCC'];
+const attendeeCompanies=['NYC SCA','DSENY Engineering Services PC'];
 function renderAttendees(){
   const root=$('attendees');root.replaceChildren();if(!state.attendees.length)root.append(el('p','No attendees entered. Add the people who actually attended.','empty'));
   state.attendees.forEach((a,i)=>{
