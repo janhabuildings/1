@@ -285,7 +285,7 @@ def space_report_title(doc):
             following=getattr(node,direction)();node.getparent().remove(node);node=following
     def blank():
         p=etree.Element(W+'p');pr=etree.SubElement(p,W+'pPr');spacing=etree.SubElement(pr,W+'spacing')
-        for key,value in (('before','0'),('after','0'),('line','240'),('lineRule','exact')):spacing.set(W+key,value)
+        for key,value in (('before','0'),('after','0'),('line','280'),('lineRule','exact')):spacing.set(W+key,value)
         return p
     for _ in range(2):title.addprevious(blank())
     last=title

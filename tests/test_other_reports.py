@@ -97,4 +97,6 @@ class NoOIsNarrative(unittest.TestCase):
                 node=title
                 for _ in range(count):
                     node=getattr(node,method)();self.assertEqual(node.tag,report_agent.W+'p');self.assertFalse(node.xpath('.//w:t'))
+                    self.assertEqual(node.xpath('.//w:spacing/@w:line'),['280'])
+                    self.assertEqual(node.xpath('.//w:spacing/@w:lineRule'),['exact'])
                 self.assertTrue(getattr(node,method)().xpath('.//w:t'))
