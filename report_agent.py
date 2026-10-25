@@ -265,6 +265,34 @@ def compact_no_ois_layout(doc):
     doc.tables[3]._element.addprevious(page)
 
 
+def no_ois_narrative(source=None):
+    """Copy the user's original No OIs wording and run formatting, without instructions."""
+    original=Document(source or ROOT/'templates/New Template Full.docx')
+    paragraphs=original.paragraphs
+    start=next(i for i,p in enumerate(paragraphs) if p.text.strip()=='Section 4')
+    end=next(i for i in range(start,len(paragraphs)) if paragraphs[i].text.startswith('DSENY adheres'))
+    return [deepcopy(p._p) for p in paragraphs[start:end+1]
+            if not p.text.strip().startswith('A. IF')]
+
+
+def space_report_title(doc):
+    """Two blank lines above the title and three below, independent of template padding."""
+    title=next((p._p for p in doc.paragraphs if p.text.strip().startswith('Title:')),None)
+    if title is None:return
+    for direction in ('getprevious','getnext'):
+        node=getattr(title,direction)()
+        while node is not None and node.tag==W+'p' and not node.xpath('.//w:t | .//w:drawing | .//w:br | .//w:pageBreakBefore'):
+            following=getattr(node,direction)();node.getparent().remove(node);node=following
+    def blank():
+        p=etree.Element(W+'p');pr=etree.SubElement(p,W+'pPr');spacing=etree.SubElement(pr,W+'spacing')
+        for key,value in (('before','0'),('after','0'),('line','240'),('lineRule','exact')):spacing.set(W+key,value)
+        return p
+    for _ in range(2):title.addprevious(blank())
+    last=title
+    for _ in range(3):
+        p=blank();last.addnext(p);last=p
+
+
 def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None, reserve_signature=False):
     validate(data, draft=draft)
     variant = 'Ois' if data['status'] == 'OIs' else 'N-Ois'
@@ -337,11 +365,12 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
             replace_cell(row.cells[1], '')
     elif data['equipment']=='OT':
         t=doc.tables[4]
-        replace_cell(t.rows[0].cells[0],'Section 4 Inspection findings — No open items')
-        set_rows(t,2,[('',data['locations'],'No open items were reported in the inspected locations.')])
+        for paragraph in no_ois_narrative(source):t._element.addprevious(paragraph)
         doc.tables[5]._element.getparent().remove(doc.tables[5]._element)
+        t._element.getparent().remove(t._element)
     if data['status']=='No OIs': compact_no_ois_layout(doc)
     separate_sections(doc)
+    if data['status']=='No OIs':space_report_title(doc)
     # Copy all original package parts verbatim except the populated main document.
     xml = etree.tostring(doc._element, xml_declaration=True, encoding='UTF-8', standalone=True)
     with ZipFile(source) as original, ZipFile(output, 'w') as result:

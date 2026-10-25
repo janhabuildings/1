@@ -28,13 +28,20 @@ class OtherReports(unittest.TestCase):
                 self.assertIn('North elevation protection',text)
                 self.assertIn('Section 3',doc.tables[3].cell(0,0).text)
                 for stale in ('Scaffold Specific','Shed Specific','CUSTOM VERBIAGE','IF OPEN ITEM REPORT','IF NO OPEN ITEM REPORT',
-                    'Requested DATE BY COMPANY','STEPS:','Kamruz','Dominic','catchall','scaffold or sheds','able to be occupied','Hoist Inspected'):
+                    'Requested DATE BY COMPANY','STEPS:','Kamruz','Dominic','Hoist Inspected'):
                     self.assertNotIn(stale,text)
                 if status=='OIs':
                     self.assertIn('Sample corrective action',text)
                     self.assertIn('Section 5',text)
                 else:
-                    self.assertIn('No open items were reported',text)
+                    self.assertIn('Observations:',text)
+                    self.assertIn('without open items or with minor deficiencies which were corrected during the inspection.',text)
+                    self.assertIn('The equipment components are formally complete and able to be occupied by appropriately trained personnel, or are able to serve as code required protection.',text)
+                    self.assertIn('DSENY adheres to IAS AC291',text)
+                    self.assertIn('There was no accumulation of heavy debris on scaffold or sheds.',text)
+                    self.assertNotIn('subject to final review and acceptance',text)
+                    self.assertNotIn('No open items were reported',text)
+                    self.assertEqual(len(doc.tables),4)
                     self.assertNotIn('Section 5',text)
                 with ZipFile(source) as a,ZipFile(path) as b:
                     for name in a.namelist():
@@ -74,3 +81,20 @@ class OtherReports(unittest.TestCase):
                         self.assertNotIn('Certification for use',client.get('/artifacts/'+html['id'],headers=HEADERS).text)
                 preview=client.post('/templates/builtin-OT-No OIs/preview',headers=HEADERS)
                 self.assertTrue(preview.json()['preview_success'],preview.text)
+
+
+class NoOIsNarrative(unittest.TestCase):
+    def test_original_no_ois_wording_and_requested_title_spacing_are_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data=sample_report('OT-No OIs');path=Path(directory)/'shoring.docx'
+            report_agent.fill_report(data,path,draft=True);doc=Document(path)
+            expected=[''.join(t.text or '' for t in node.iter(report_agent.W+'t')) for node in report_agent.no_ois_narrative()]
+            actual=[p.text for p in doc.paragraphs]
+            for text in expected:
+                if text.strip():self.assertIn(text,actual)
+            title=next(p._p for p in doc.paragraphs if p.text.startswith('Title:'))
+            for method,count in (('getprevious',2),('getnext',3)):
+                node=title
+                for _ in range(count):
+                    node=getattr(node,method)();self.assertEqual(node.tag,report_agent.W+'p');self.assertFalse(node.xpath('.//w:t'))
+                self.assertTrue(getattr(node,method)().xpath('.//w:t'))
