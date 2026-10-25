@@ -1,0 +1,42 @@
+Requested DATE BY COMPANY
+STEPS:
+2. Update subject line: YYYY-MM-MM Project/Location Product-RMN#-Inspection-OIs
+Section 3
+5. Delete unused equipment rows before sending.
+2026-10-23 G Washington (M465) Main Building Interior Shoring-V-Inspection-OIs
+2026-10-23 G Washington (M465) Main Building Interior Shoring-V-Inspection - PE CERT OF USE
+2026-10-23 G Washington (M465) Field House Interior Shoring-VI-Inspection-OIs
+2026-10-23 G Washington (M465) Field House Interior Shoring-VI-Inspection- PE CERT OF USE
+IF NO OPEN ITEM REPORT:
+There are no open items. Certification for use is included in conclusion.
+Section 1 Description: retained to perform an inspection.
+Client:	Keltech	Project:	G Washington HS
+Request date:	10/16/2026	Inspected on:	10/22/2026	Request by:	Example Requester
+Product Inspected:	Main Building Interior Shoring
+Field House Interior Shoring
+Permit#:		Contractor is responsible for ensuring all permits are kept current.
+Address:	549 Audubon Avenue Mn NY
+PE Drawings on site?	Yes | NA | No
+Drawings DOB/SCA approved?	Yes | NA | No
+Section 2	Attendees Names	Company Agency	Title
+10.	Example Template Engineer	DSENY Engineering Services PC	PE
+START OF SECTION 3 OF SHED REPORT
+Section 3 Shed Specific Location:
+LOCATION/S:	 ALL LOCATIONS AS PER APPROVED DRAWINGS
+Appx LF SH	 	# of Individual Sections	 	Max Height (ft) ±	 	Max Width (ft) ±
+Section 4 CERTIFICATE OF COMPLETED INSTALLATION (CCI)
+A. IF CCI REPORT
+Structural components of the equipment were inspected throughout locations listed above.
+END OF SHED REPORT
+START OF SECTION 3 OF SCAFFOLD REPORT
+Section 3 Scaffold Specific Location
+LOCATION/S:	 ALL LOCATIONS AS PER APPROVED DRAWINGS
+Appx LF SF	 	Max Height (ft) ±	 	Tie Spacing (Horizontal)	 	Tie Spacing (Vertical)
+Tie Type	Masonry Anchor | Concrete Wall Anchor | Concrete Slab Anchor | Steel Beam Anchor
+Dunnage Type:	Grade | Roof | Shed
+Section 4 CERTIFICATE OF COMPLETED INSTALLATION (CCI)
+END OF SCAFFOLD REPORT
+START OF SECTION 3 OF OTHER REPORT
+Section 3 Location
+LOCATION/S:	 ALL LOCATIONS AS PER APPROVED DRAWINGS
+Section 4 Open Items

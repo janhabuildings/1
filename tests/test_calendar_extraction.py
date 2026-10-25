@@ -104,3 +104,20 @@ Section 3 Scaffold Specific Location
         self.assertEqual(calendar_candidates('2026-10-24 IS561K Fall Protection-I-Inspection-OIs')['fields']['project'],'IS561K')
         same_kind=calendar_candidates('2026-10-24 ONE Supported Scaffold-I-Inspection-OIs\n2026-10-24 TWO Supported Scaffold-I-Inspection-No OIs')
         self.assertNotIn('project',same_kind['fields'])
+
+    def test_shoring_subjects_cert_of_use_and_unused_equipment_template_sections(self):
+        from pathlib import Path
+        value=calendar_candidates((Path(__file__).parent/'fixtures/shoring_calendar.txt').read_text())
+        self.assertEqual(value['fields']['client'],'Keltech')
+        self.assertEqual(value['fields']['project'],'G Washington HS')
+        self.assertEqual(len(value['titles']),4)
+        self.assertEqual([r['equipment'] for r in value['equipment']],['OT'])
+        self.assertNotIn('inspection_code',value['equipment'][0])
+        self.assertNotIn('other_name',value['equipment'][0])
+        self.assertEqual([r['inspection_code'] for r in value['report_subjects']],['V','V','VI','VI'])
+        self.assertEqual(value['report_subjects'][2]['other_name'],'Field House Interior Shoring')
+        self.assertNotIn('permit',value['fields'])
+        self.assertNotIn('drawings_on_site',value['fields'])
+        self.assertNotIn('status',str(value['equipment']))
+        self.assertNotIn('locations',value['equipment'][0])
+        self.assertFalse(value['confirmed'])

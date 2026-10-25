@@ -129,6 +129,21 @@ M00981443-I1 SF
         self.assertTrue(self.client.get('/artifacts/'+pdf['id'],headers=HEADERS).content.startswith(b'%PDF-'))
         self.assertEqual(self.client.get('/artifacts/'+pdf['id']).status_code,401)
 
+    def test_shared_calendar_facts_persist_without_a_report_and_legacy_clients_keep_them(self):
+        inspection=self.inspection();identity=inspection['id']
+        payload={'title':'General inspection','inspection_date':'2026-10-25','client':'Fixture Client','address':'Fixture Address','requested_by':'Fixture Requester','request_date':'2026-10-16','calendar_text':'2026-10-23 TEST Shoring-V-Inspection - PE CERT OF USE'}
+        response=self.client.put('/inspections/'+identity,headers=HEADERS,json=payload)
+        self.assertEqual(response.status_code,200)
+        loaded=self.client.get('/inspections/'+identity,headers=HEADERS).json()
+        self.assertEqual(loaded['reports'],[])
+        self.assertEqual(loaded['client'],'Fixture Client')
+        self.assertEqual(loaded['calendar_candidates']['equipment'][0]['equipment'],'OT')
+        for key in ('client','address','requested_by','request_date'):payload.pop(key)
+        response=self.client.put('/inspections/'+identity,headers=HEADERS,json=payload)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()['client'],'Fixture Client')
+
+
 class ReferenceIndex(unittest.TestCase):
     def record(self,**updates):
         # Synthetic test fixtures, never distributed as actual regulatory text.

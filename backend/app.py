@@ -60,6 +60,11 @@ class InspectionInput(BaseModel):
     title: str = Field(min_length=1,max_length=200)
     project: str = Field(default='',max_length=200)
     inspection_date: date
+    client: str = Field(default='',max_length=1000)
+    request_date: str = Field(default='',max_length=100)
+    requested_by: str = Field(default='',max_length=1000)
+    address: str = Field(default='',max_length=2000)
+    subject_project: str = Field(default='',max_length=1000)
     calendar_text: str = Field(default='',max_length=100000)
     transcript: str = Field(default='',max_length=100000)
     notes: str = Field(default='',max_length=100000)
@@ -183,7 +188,10 @@ def create_app(settings=None):
         return store.save(payload)
 
     @app.get('/inspections/{identity}',dependencies=[Depends(authorized)])
-    def get_inspection(identity:str): return store.get(identity)
+    def get_inspection(identity:str):
+        record=store.get(identity)
+        if record.get('calendar_text'):record['calendar_candidates']=calendar_candidates(record['calendar_text'])
+        return record
 
     @app.put('/inspections/{identity}',dependencies=[Depends(authorized)])
     def update_inspection(identity:str,data:InspectionInput):
@@ -193,6 +201,11 @@ def create_app(settings=None):
         payload=dict(json.loads(data.model_dump_json()),id=identity)
         with store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
+            previous=db.execute('SELECT payload FROM inspections WHERE id=?',(identity,)).fetchone()
+            if previous:
+                old=json.loads(previous['payload'])
+                for key in ('client','request_date','requested_by','address','subject_project'):
+                    if key not in data.model_fields_set:payload[key]=old.get(key,'')
             if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}

@@ -184,15 +184,23 @@ def calendar_candidates(text):
     if not result.get('project'):
         projects = {m.group(1).strip() for m in re.finditer(r'^\d{4}-\d{2}-\d{2} (.+?) (?:Supported Scaffold|Sidewalk Shed|Fall Protection|SOE|Fence)-[IVXLCDM\d]+-Inspection-(?:No\s+OIs|OIs)\s*$', text, re.I|re.M)}
         if len(projects)==1: result['project']=next(iter(projects))
-    titles = []
-    for line in text.splitlines():
-        title = re.sub(r'\s+', ' ', line).strip()
-        match = re.fullmatch(r'(\d{4}-\d{2}-\d{2}) .+?-[IVXLCDM\d]+-Inspection-(?:No\s+OIs|OIs)', title, re.I)
-        if not match: continue
-        try: date.fromisoformat(match.group(1))
-        except ValueError: continue
-        if title not in titles: titles.append(title)
-    return {'fields':result,'equipment':equipment,'titles':titles,'confirmed':False,
+    from backend.calendar_facts import report_subjects
+    subjects=report_subjects(text)
+    titles=[row['title'] for row in subjects]
+    for kind in ('SF','SH','OT'):
+        rows=[row for row in subjects if row['equipment']==kind]
+        if not rows:continue
+        item=next((row for row in equipment if row['equipment']==kind),None)
+        if item is None:item={'equipment':kind};equipment.append(item)
+        # Distinct same-kind subjects must not borrow the first inspection number.
+        for key in ('inspection_date','inspection_code','subject_project','report_type','other_name'):
+            values={row.get(key) for row in rows}
+            if len(values)==1 and None not in values:item[key]=values.pop()
+            else:item.pop(key,None)
+    if not result.get('project'):
+        projects={row.get('subject_project') for row in subjects}
+        if len(projects)==1 and None not in projects:result['project']=projects.pop()
+    return {'fields':result,'equipment':equipment,'titles':titles,'report_subjects':subjects,'confirmed':False,
             'notice':'Calendar template alternatives are not inspection results. Confirm all candidates.'}
 
 
