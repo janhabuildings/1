@@ -448,6 +448,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#calendar-title').select_option(titles[2])
         self.page.locator('[data-tab=reports]').click()
         self.page.get_by_label('Inspection number · VII / VIII',exact=True).fill('VI')
+        self.assertEqual(self.page.evaluate('state.reports[0].inspection_code'),'VI')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         identity=self.app.state.store.list()[0]['id']
