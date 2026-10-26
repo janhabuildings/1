@@ -187,6 +187,8 @@ def calendar_candidates(text):
     from backend.calendar_facts import report_subjects
     subjects=report_subjects(text)
     titles=[row['title'] for row in subjects]
+    subject_dates={row['inspection_date'] for row in subjects}
+    if not result.get('inspection_date') and len(subject_dates)==1: result['inspection_date']=next(iter(subject_dates))
     for kind in ('SF','SH','OT'):
         rows=[row for row in subjects if row['equipment']==kind]
         if not rows:continue
