@@ -5,3 +5,18 @@
 #report-preview{width:min(1100px,96vw);max-width:96vw;height:92dvh;max-height:96dvh;padding:20px;border:1px solid var(--line);border-radius:10px;color:var(--ink);background:#fff;overflow:auto}#report-preview::backdrop{background:#14342f99}.preview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}.preview-toolbar h2{font-size:16px;margin:0;overflow-wrap:anywhere}.preview-toolbar .actions{flex-shrink:0}#preview-frame{display:block;width:100%;height:calc(100% - 160px);min-height:300px;border:1px solid var(--line);border-radius:5px;background:white}body:has(#report-preview[open]){overflow:hidden}@media(max-width:650px){.row{grid-template-columns:minmax(0,1fr) 32px}.row>label,.row>.multi-choice{grid-column:1}.row>.remove-icon{grid-column:2;grid-row:1;align-self:center}.findings-row{grid-template-columns:minmax(0,1fr) 32px}.findings-row>label,.findings-row>div{grid-column:1}.findings-row>.remove-icon{grid-column:2;grid-row:1}.preview-toolbar{align-items:start}.preview-toolbar .actions{gap:4px}.preview-toolbar button.secondary{font-size:12px;padding:8px}#report-preview{padding:12px}#preview-frame{height:calc(100% - 195px)}}
 
 .report-type-tabs .selected{background:var(--teal);color:white;border-color:var(--teal)}.report-card{scroll-margin-top:16px}
+
+/* Keep selections and input inside one aligned cell. */
+.choice-cell{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:44px;height:100%;padding:5px 7px;border:1px solid #bdcec6;border-radius:6px;background:#fcfdfb}
+.choice-cell:focus-within{outline:2px solid #8bbca7;outline-offset:1px}
+.choice-cell>input[type=search]{flex:1 1 75px;width:75px;min-width:65px;margin:0;padding:5px;border:0;border-radius:0;background:transparent;box-shadow:none;font-size:13px;font-weight:400}
+.choice-cell>input:focus{outline:none}
+.choice-cell>input::placeholder{color:#7e8d87;font-weight:400;opacity:1}
+.choice-cell>.choice-tags{display:contents}
+.choice-cell .choice-tag{margin:0;max-width:100%;background:#edf2ee}
+.attendee-row{align-items:stretch}
+.attendee-row>.attendee-name{display:flex;font-size:0;margin:12px 0;min-width:0}
+.attendee-name input{height:100%;min-height:44px;margin:0;font-size:13px;font-weight:400}
+.attendee-row>.multi-choice{align-self:stretch}
+.attendee-row>.remove-icon{align-self:center}
+@media(max-width:650px){.attendee-row>.attendee-name{margin-bottom:0}.attendee-row>.multi-choice{margin:0}.attendee-row>.remove-icon{align-self:start;margin-top:18px}}
