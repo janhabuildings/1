@@ -22,7 +22,7 @@ def report_subjects(text):
         prefix=match[2].strip()
         product=next((p for p in sorted(products,key=len,reverse=True) if prefix.casefold().endswith(' '+p.casefold())),None)
         if not product:
-            found=re.search(r'(Supported Scaffold|Sidewalk Shed|Fall Protection|SOE|Fence|Shoring)$',prefix,re.I)
+            found=re.search(r'(Supported Scaffold|Sidewalk Shed|Fall Protection|SOE|Fence|Shoring|SStab)$',prefix,re.I)
             if found:product=found[1]
         equipment='SF' if product and product.casefold()=='supported scaffold' else 'SH' if product and product.casefold()=='sidewalk shed' else 'OT'
         row={'title':title,'equipment':equipment,'inspection_date':match[1],'inspection_code':match[3]}
@@ -30,6 +30,6 @@ def report_subjects(text):
             row['subject_project']=prefix[:-len(product)].strip()
             if equipment=='OT':
                 row['other_name']=product
-                row['report_type']=product if product in ('SOE','Fall Protection','Fence') else 'Unknown / custom'
+                row['report_type']={'soe':'SOE','fall protection':'Fall Protection','fence':'Fence','shoring':'Shoring','sstab':'SStab'}.get(product.casefold(),'Unknown / custom')
         if not any(r['title']==title for r in rows):rows.append(row)
     return rows

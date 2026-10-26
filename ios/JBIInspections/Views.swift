@@ -331,7 +331,7 @@ struct InspectionDetail: View {
                     .onChange(of: selectedCalendarTitle) { _, title in
                         if !title.isEmpty { inspection.title = title; store.save(inspection) }
                     }
-                Text("Choose a title when several are listed. Report outcome and inspection date are confirmed separately.").font(.caption)
+                Text("Choose a title when several are listed. Calendar dates fill on extraction. Review the dates and confirm the report outcome separately.").font(.caption)
             }
         }
     }
@@ -529,21 +529,21 @@ struct InspectionDetail: View {
                 let object = try JSONSerialization.jsonObject(with: data)
                 let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
                 suggestions = String(data: pretty, encoding: .utf8) ?? ""
-                applyCalendar(clearCandidates: false)
+                applyCalendar(clearCandidates: false, applyDates: true)
                 store.save(inspection)
                 scheduleSync()
-                status = "Calendar details filled and saved on this phone. Review the fields and choose a title if several are listed. Existing facts and inspection date were kept."
+                status = "Calendar details filled and saved on this phone. Review the fields and choose a title if several are listed. Calendar inspection and request dates were filled; other existing facts were kept."
             } catch { store.error = error.localizedDescription }
         }
     }
     private func calendarFieldMissing(_ value: String) -> Bool {
         ["", "[pending confirmation]", "pending", "tbd"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
     }
-    private func applyCalendar(clearCandidates: Bool = true) {
+    private func applyCalendar(clearCandidates: Bool = true, applyDates: Bool = false) {
         guard let candidates = calendarCandidates else { return }
         if !selectedCalendarTitle.isEmpty { inspection.title = selectedCalendarTitle }
         if let value = candidates.fields["project"], calendarFieldMissing(inspection.project) { inspection.project = value }
-        if let value = candidates.fields["inspection_date"], calendarFieldMissing(inspection.inspection_date) { inspection.inspection_date = value }
+        if let value = candidates.fields["inspection_date"], applyDates || calendarFieldMissing(inspection.inspection_date) { inspection.inspection_date = value }
         for item in candidates.equipment {
             if let equipment = item["equipment"], !inspection.reports.contains(where: { $0.equipment == equipment }) { addReport(equipment) }
         }
@@ -552,8 +552,8 @@ struct InspectionDetail: View {
             if calendarFieldMissing(inspection.reports[index].project) { inspection.reports[index].project = candidates.fields["project"] ?? inspection.project }
             if calendarFieldMissing(inspection.reports[index].requested_by) { inspection.reports[index].requested_by = candidates.fields["requested_by"] ?? "" }
             if calendarFieldMissing(inspection.reports[index].address) { inspection.reports[index].address = candidates.fields["address"] ?? "" }
-            if calendarFieldMissing(inspection.reports[index].request_date) { inspection.reports[index].request_date = candidates.fields["request_date"] ?? "" }
-            if calendarFieldMissing(inspection.reports[index].inspection_date) { inspection.reports[index].inspection_date = inspection.inspection_date }
+            if let date = candidates.fields["request_date"], applyDates || calendarFieldMissing(inspection.reports[index].request_date) { inspection.reports[index].request_date = date }
+            if (applyDates && candidates.fields["inspection_date"] != nil) || calendarFieldMissing(inspection.reports[index].inspection_date) { inspection.reports[index].inspection_date = inspection.inspection_date }
             if calendarFieldMissing(inspection.reports[index].drawings_on_site) { inspection.reports[index].drawings_on_site = candidates.fields["drawings_on_site"] ?? "" }
             if calendarFieldMissing(inspection.reports[index].drawings_approved) { inspection.reports[index].drawings_approved = candidates.fields["drawings_approved"] ?? "" }
             if inspection.reports.count == 1 && calendarFieldMissing(inspection.reports[index].permit) { inspection.reports[index].permit = candidates.fields["permit"] ?? "" }
@@ -561,6 +561,9 @@ struct InspectionDetail: View {
                 if calendarFieldMissing(inspection.reports[index].permit) { inspection.reports[index].permit = item["permit"] ?? "" }
                 if calendarFieldMissing(inspection.reports[index].inspection_code) { inspection.reports[index].inspection_code = item["inspection_code"] ?? "" }
                 if calendarFieldMissing(inspection.reports[index].subject_project) { inspection.reports[index].subject_project = item["subject_project"] ?? "" }
+                for key in ["report_type", "other_name"] {
+                    if let value = item[key], calendarFieldMissing(inspection.reports[index].site[key] ?? "") { inspection.reports[index].site[key] = value }
+                }
             }
         }
         if clearCandidates { calendarCandidates = nil }

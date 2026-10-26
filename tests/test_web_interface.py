@@ -50,14 +50,14 @@ class WebWorkflow(unittest.TestCase):
 
     def choose_multiple_value(self,label,option):
         search=self.page.get_by_label('Search '+label,exact=True)
-        control=search.locator('..')
+        control=search.locator('../..')
         search.focus()
         search.fill(option)
         self.page.get_by_role('option',name=label+': '+option,exact=True).click()
         search.fill('')
     def add_custom_value(self,label,value):
         search=self.page.get_by_label('Search '+label,exact=True)
-        control=search.locator('..')
+        control=search.locator('../..')
         search.focus()
         search.fill(value)
         control.get_by_role('button',name='Add custom: '+value,exact=True).click()
@@ -233,8 +233,8 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(saved['reports'][0]['site']['dunnage_type'], 'Roof; Timber pads on sleepers')
         self.page.locator('#add-SH').click()
         self.page.locator('#add-SF').click()  # Switching back must preserve custom values.
-        self.assertIn('Roof',self.page.get_by_label('Search Dunnage type').locator('..').locator('.choice-tags').inner_text())
-        self.assertIn('Timber pads on sleepers',self.page.get_by_label('Search Dunnage type').locator('..').locator('.choice-tags').inner_text())
+        self.assertIn('Roof',self.page.get_by_label('Search Dunnage type').locator('../..').locator('.choice-tags').inner_text())
+        self.assertIn('Timber pads on sleepers',self.page.get_by_label('Search Dunnage type').locator('../..').locator('.choice-tags').inner_text())
         self.assertEqual(self.errors, [])
 
     def test_corrective_actions_search_multiselect_custom_and_save(self):
@@ -332,16 +332,18 @@ class WebWorkflow(unittest.TestCase):
         self.connect()
         self.page.locator('#client').fill('Inspector confirmed client')
         self.page.locator('#inspection_date').fill('2026-10-24')
+        self.page.locator('#request_date').fill('2026-10-20')
         title='2026-05-11 PS87Q Supported Scaffold-I-Inspection-OIs'
         self.page.locator('#calendar_text').fill(title+'\nClient:\tCalendar client\tProject:\tPS87Q\nRequest date:\t05.06.2026\tInspected on:\t05.11.2026\tRequest by:\tExample Contact\nExample Company\nPermit#:\tQ01248704\nAddress:\t67-54 80 Street Qns NY')
         self.page.locator('#extract').click()
         expect(self.page.locator('#project')).to_have_value('PS87Q')
+        expect(self.page.locator('#request_date')).to_have_value('2026-05-06')
         expect(self.page.locator('#extract')).to_be_enabled()
         self.assertEqual(self.page.locator('#title').input_value(),title)
         self.assertEqual(self.page.locator('#requested_by').input_value(),'Example Contact Example Company')
         self.assertEqual(self.page.locator('#address').input_value(),'67-54 80 Street Qns NY')
         self.assertEqual(self.page.locator('#client').input_value(),'Inspector confirmed client')
-        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-24')
+        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-05-11')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         saved=self.app.state.store.list()[0]
@@ -352,7 +354,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#saved').select_option(saved['id'])
         expect(self.page.locator('#requested_by')).to_have_value('Example Contact Example Company')
         self.assertEqual(self.page.locator('#title').input_value(),title)
-        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-24')
+        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-05-11')
         self.assertEqual(self.errors, [])
 
     def test_editing_does_not_block_other_reports_and_attendee_dropdowns_save(self):
@@ -364,7 +366,7 @@ class WebWorkflow(unittest.TestCase):
         self.choose_multiple_value('Role','PE')
         self.choose_multiple_value('Company / agency','NYC SCA')
         self.add_custom_value('Company / agency','Example Company')
-        roles=self.page.get_by_label('Search Role',exact=True).locator('..')
+        roles=self.page.get_by_label('Search Role',exact=True).locator('../..')
         roles.get_by_role('button',name='Remove PE',exact=True).click()
         self.choose_multiple_value('Role','PE')
         self.page.get_by_label('Search Role',exact=True).fill('Competent')
@@ -458,7 +460,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.get_by_label('Inspection number · VII / VIII',exact=True)).to_have_value('VI')
         expect(self.page.get_by_label('Item name (for unknown / custom)',exact=True)).to_have_value('Field House Interior Shoring')
-        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-25')
+        self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-10-22')
         self.assertEqual(self.errors,[])
 
     def test_calendar_shared_facts_survive_saving_before_a_report_exists(self):
@@ -489,7 +491,7 @@ class WebWorkflow(unittest.TestCase):
         owner=self.page.get_by_role('option',name='Role: Owner’s Representative',exact=True)
         expect(owner).to_be_visible()
         expect(owner).to_have_attribute('aria-selected','false')
-        self.assertEqual(search.locator('..').locator('input[type=checkbox]').count(),0)
+        self.assertEqual(search.locator('../..').locator('input[type=checkbox]').count(),0)
         search.press('ArrowDown');search.press('Enter')
         expect(owner).to_have_attribute('aria-selected','true')
         expect(owner.locator('.choice-check')).to_have_text('✓')
@@ -586,4 +588,31 @@ class WebWorkflow(unittest.TestCase):
         self.assertTrue(self.page.evaluate('() => document.documentElement.scrollWidth <= innerWidth'))
         search.press('Escape')
         self.page.get_by_role('button',name='Remove Safety Inspector',exact=True).click()
+        self.assertEqual(self.errors,[])
+
+    def test_attendees_cells_align_and_keep_selected_values_inside(self):
+        from playwright.sync_api import expect
+        self.connect()
+        expect(self.page.get_by_role('heading',name='Attendees',exact=True)).to_be_visible()
+        self.page.locator('#add-attendee').click()
+        self.page.get_by_placeholder('Name',exact=True).fill('Example Engineer')
+        self.choose_multiple_value('Company / agency','DSENY Engineering Services PC')
+        self.choose_multiple_value('Role','PE')
+        self.page.get_by_role('combobox',name='Search Role',exact=True).press('Escape')
+        row=self.page.locator('.attendee-row')
+        cells=[row.locator('.attendee-name input').bounding_box(),*row.locator('.choice-cell').evaluate_all('nodes => nodes.map(node => {const r=node.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height};})')]
+        self.assertLess(max(r['y'] for r in cells)-min(r['y'] for r in cells),2)
+        self.assertLess(max(r['height'] for r in cells)-min(r['height'] for r in cells),2)
+        for tag in row.locator('.choice-tag').all():
+            self.assertTrue(tag.evaluate('node => {const a=node.getBoundingClientRect(),b=node.closest(".choice-cell").getBoundingClientRect();return a.top>=b.top && a.bottom<=b.bottom && a.left>=b.left && a.right<=b.right;}'))
+        self.page.locator('[data-tab=reports]').click();self.page.locator('#add-OT').click()
+        other=self.page.get_by_label('Other inspection type',exact=True)
+        other.select_option('Shoring');expect(other).to_have_value('Shoring')
+        other.select_option('SStab');self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        saved=self.app.state.store.list()[0]
+        self.assertEqual(saved['reports'][0]['site']['report_type'],'SStab')
+        self.page.reload();self.connect();self.page.locator('#saved').select_option(saved['id'])
+        expect(self.page.get_by_placeholder('Name',exact=True)).to_have_value('Example Engineer')
+        expect(self.page.locator('.choice-cell').filter(has_text='DSENY Engineering Services PC')).to_be_visible()
         self.assertEqual(self.errors,[])
