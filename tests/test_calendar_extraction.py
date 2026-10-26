@@ -129,3 +129,13 @@ Section 3 Scaffold Specific Location
         self.assertEqual(result['equipment'][0]['inspection_code'],'I')
         self.assertFalse(result['confirmed'])
         self.assertNotIn('status',result['equipment'][0])
+
+    def test_subject_date_fallback_is_unambiguous_and_labeled_date_wins(self):
+        title='2026-10-24 TEST Shoring-I-Inspection-OIs'
+        value=calendar_candidates(title+'\nRequest date: 10/20/2026')
+        self.assertEqual(value['fields']['inspection_date'],'2026-10-24')
+        self.assertEqual(value['fields']['request_date'],'2026-10-20')
+        self.assertEqual(value['equipment'][0]['report_type'],'Shoring')
+        self.assertEqual(calendar_candidates(title+'\nInspected on: 10/23/2026')['fields']['inspection_date'],'2026-10-23')
+        self.assertNotIn('inspection_date',calendar_candidates(title+'\n2026-10-25 TEST Shoring-II-Inspection-OIs')['fields'])
+        self.assertEqual(calendar_candidates('2026-10-24 TEST SStab-I-Inspection-OIs')['equipment'][0]['report_type'],'SStab')
