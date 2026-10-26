@@ -42,8 +42,8 @@ struct MultiChoiceField: View {
     @Binding var value: String
     var options: [String]
     var separator = "; "
-    @State private var showing = false
     @State private var query = ""
+    @FocusState private var searching: Bool
     private var selected: [String] {
         value.components(separatedBy: separator == "\n" ? .newlines : CharacterSet(charactersIn: ";\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
@@ -59,39 +59,52 @@ struct MultiChoiceField: View {
         value = items.joined(separator: separator)
     }
     var body: some View {
-        Button { showing = true; query = "" } label: {
-            VStack(alignment: .leading) {
-                Text(label)
-                Text(value.isEmpty ? "Choose one or more…" : value).font(.caption).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(.borderless)
-        .sheet(isPresented: $showing) {
-            NavigationStack {
-                List {
-                    if !selected.isEmpty {
-                        Section("Selected — tap to remove") {
-                            ForEach(selected, id: \.self) { option in
-                                Button { toggle(option) } label: { Label(option, systemImage: "checkmark.square.fill") }
-                            }
-                            Button("Clear selections", role: .destructive) { value = "" }
-                        }
-                    }
-                    Section("Suggestions — select multiple") {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField(label, text: $query, prompt: Text(label).foregroundStyle(.secondary))
+                .focused($searching)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityLabel("Search " + label)
+            ForEach(selected, id: \.self) { option in
+                HStack {
+                    Text(option).font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    CompactRemoveButton(label: "Remove " + option) { toggle(option) }
+                }
+            }
+            if searching {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
                         ForEach(options.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }, id: \.self) { option in
                             Button { toggle(option) } label: {
-                                Label(option, systemImage: selected.contains(option) ? "checkmark.square.fill" : "square")
-                            }
+                                HStack {
+                                    Text(option).foregroundStyle(.primary).multilineTextAlignment(.leading)
+                                    Spacer(minLength: 8)
+                                    if selected.contains(option) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                }.padding(.vertical, 9).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .accessibilityValue(selected.contains(option) ? "Selected" : "Not selected")
+                        }
+                        let custom = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !custom.isEmpty && !options.contains(where: { $0.caseInsensitiveCompare(custom) == .orderedSame }) && !selected.contains(where: { $0.caseInsensitiveCompare(custom) == .orderedSame }) {
+                            Button("Add custom: " + custom) { toggle(custom); query = "" }.buttonStyle(.borderless)
                         }
                     }
-                    let custom = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !custom.isEmpty && !options.contains(custom) && !selected.contains(custom) {
-                        Button("Add custom: " + custom) { toggle(custom); query = "" }
-                    }
-                }.searchable(text: $query, prompt: "Type to search or add a custom value")
-                .navigationTitle(label)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showing = false } } }
+                }.frame(maxHeight: 240)
+                Button("Done") { searching = false; query = "" }.font(.caption).buttonStyle(.borderless)
             }
         }
+    }
+}
+
+struct CompactRemoveButton: View {
+    var label: String
+    var action: () -> Void
+    var body: some View {
+        Button(role: .destructive, action: action) {
+            Image(systemName: "xmark").font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary).frame(width: 32, height: 32).contentShape(Rectangle())
+        }.buttonStyle(.borderless).accessibilityLabel(label)
     }
 }
 
@@ -157,10 +170,9 @@ struct ReportEditor: View {
             Section("Actual attendees") {
                 ForEach($report.attendees) { $attendee in
                     VStack {
-                        TextField("Name", text: $attendee.name)
+                        HStack { TextField("Name", text: $attendee.name); CompactRemoveButton(label: "Remove attendee") { report.attendees.removeAll { $0.id == attendee.id } } }
                         MultiChoiceField(label: "Company / agency", value: $attendee.company, options: AttendeeOptions.companies)
                         MultiChoiceField(label: "Role", value: $attendee.title, options: AttendeeOptions.roles)
-                        Button("Remove attendee", role: .destructive) { report.attendees.removeAll { $0.id == attendee.id } }.buttonStyle(.borderless)
                     }
                 }.onDelete { report.attendees.remove(atOffsets: $0) }
                 Button("Add attendee") { report.attendees.append(Attendee()) }
@@ -194,10 +206,9 @@ struct ReportEditor: View {
             Section("Open items") {
                 ForEach($report.open_items) { $finding in
                     VStack {
-                        TextField("Location / occurrence", text: $finding.location, axis: .vertical)
+                        HStack { TextField("Location / occurrence", text: $finding.location, axis: .vertical); CompactRemoveButton(label: "Remove open item") { report.open_items.removeAll { $0.id == finding.id } } }
                         MultiChoiceField(label: "Suggested corrective actions", value: $finding.action, options: CorrectionOptions.byEquipment[report.equipment] ?? [], separator: "\n")
                         TextField("Edit corrective action wording", text: $finding.action, axis: .vertical)
-                        Button("Remove open item", role: .destructive) { report.open_items.removeAll { $0.id == finding.id } }.buttonStyle(.borderless)
                     }
                 }.onDelete { report.open_items.remove(atOffsets: $0) }
                 Button("Add open item") { report.open_items.append(Finding()) }
