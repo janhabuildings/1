@@ -153,8 +153,8 @@ def create_app(settings=None):
         response.headers['X-Content-Type-Options']='nosniff'
         response.headers['Referrer-Policy']='no-referrer'
         response.headers['Content-Security-Policy']=("default-src 'self'; script-src 'self'; "
-            "style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; "
-            "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            "style-src 'self' 'unsafe-inline'; img-src 'self' blob:; media-src 'self' blob:; "
+            "connect-src 'self'; frame-src 'self' blob:; object-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         return response
 
     @app.get('/',include_in_schema=False)
@@ -443,12 +443,13 @@ def create_app(settings=None):
                 'notice':('Your visual signature/stamp image was placed behind Section 3 text in No OIs DOCX files and behind page 2 content in PDFs after your confirmation. This is not a cryptographic digital signature; review before delivery.' if stamp else 'Review rendering and missing facts; no professional signature or seal has been applied.')}
 
     @app.post('/inspections/{identity}/reports',dependencies=[Depends(authorized)])
-    async def generate_reports(identity:str,data:ExportInput):
+    async def generate_reports(identity:str,data:ExportInput,equipment:Literal['SF','SH','OT']|None=None):
         inspection=store.get(identity)
-        if not inspection.get('reports'): raise HTTPException(422,'Add at least one report with an explicit OIs/No OIs result')
+        entries=[report for report in inspection.get('reports',[]) if equipment is None or report['equipment']==equipment]
+        if not entries: raise HTTPException(422,'Add at least one report with an explicit OIs/No OIs result')
         try: selected=templates.active()
         except ValueError as error: raise HTTPException(409,str(error))
-        return await render_reports(inspection['reports'],data,selected,identity)
+        return await render_reports(entries,data,selected,identity)
 
     @app.get('/sync/deletions',dependencies=[Depends(authorized)])
     def deleted_records(): return lifecycle.deletions(store)
