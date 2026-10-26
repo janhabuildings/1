@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook
 import PhotosUI
 import AVFoundation
 import MessageUI
@@ -135,6 +136,7 @@ struct InspectionDetail: View {
     @State private var selectedCalendarTitle = ""
     @State private var export: ExportResult?
     @State private var share: SharedItems?
+    @State private var reportPreviewURL: URL?
     @State private var mail: MailPayload?
     @State private var showText = false
     @State private var status = ""
@@ -242,6 +244,7 @@ struct InspectionDetail: View {
         } message: { Text(confirmationMessage) }
         .sheet(isPresented: $camera) { CameraView(captured: savePhoto).ignoresSafeArea() }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
+        .quickLookPreview($reportPreviewURL)
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments, sender: $0.sender, to: $0.to, cc: $0.cc) }
         .sheet(isPresented: $showText) { TextDraft(body: "\(inspection.project) — inspection \(inspection.inspection_date)\n\(inspection.notes)") }
         .fileImporter(isPresented: $importFile, allowedContentTypes: [.audio, .plainText], allowsMultipleSelection: false, onCompletion: importMedia)
@@ -392,7 +395,7 @@ struct InspectionDetail: View {
             ForEach(inspection.reports) { report in
                 HStack {
                     NavigationLink(report.displayName + " report", value: ReportRoute(equipment: report.equipment))
-                    Button("Remove", role: .destructive) { removeReportType = report.equipment }.buttonStyle(.borderless)
+                    CompactRemoveButton(label: "Remove report") { removeReportType = report.equipment }
                 }
             }
             if !inspection.reports.contains(where: { $0.equipment == "SF" }) { Button("Add scaffold report") { addReport("SF") } }
@@ -431,6 +434,11 @@ struct InspectionDetail: View {
                     Text(artifact.filename).font(.caption)
                     HStack {
                         Button("Delete", role: .destructive) { removeArtifactID = artifact.id }.buttonStyle(.borderless)
+                        if ["application/pdf", "text/html", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].contains(artifact.mime) {
+                            Button("Preview") {
+                                Task { do { reportPreviewURL = try await store.download(artifact, inspectionID: inspection.id) } catch { store.error = error.localizedDescription } }
+                            }.buttonStyle(.borderless)
+                        }
                         Button("Open / share") {
                             Task { do { share = SharedItems(items: [try await store.download(artifact, inspectionID: inspection.id)]) } catch { store.error = error.localizedDescription } }
                         }.buttonStyle(.borderless)
