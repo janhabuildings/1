@@ -60,18 +60,21 @@ struct MultiChoiceField: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField(label, text: $query, prompt: Text(label).foregroundStyle(.secondary))
-                .focused($searching)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityLabel("Search " + label)
-            ForEach(selected, id: \.self) { option in
-                HStack {
-                    Text(option).font(.caption).foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    CompactRemoveButton(label: "Remove " + option) { toggle(option) }
+            VStack(alignment: .leading, spacing: 4) {
+                TextField(label, text: $query, prompt: Text(label).foregroundStyle(.secondary))
+                    .focused($searching)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityLabel("Search " + label)
+                ForEach(selected, id: \.self) { option in
+                    HStack {
+                        Text(option).font(.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        CompactRemoveButton(label: "Remove " + option) { toggle(option) }
+                    }
                 }
-            }
+            }.padding(8)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
             if searching {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -141,6 +144,8 @@ struct ReportEditor: View {
             if report.equipment == "OT" {
                 Section("Other inspected item") {
                     Picker("Inspection type", selection: siteBinding("report_type", defaultValue: "Unknown / custom")) {
+                        Text("Shoring").tag("Shoring")
+                        Text("SStab").tag("SStab")
                         Text("SOE (Support of Excavation)").tag("SOE")
                         Text("Fall Protection").tag("Fall Protection")
                         Text("Fence").tag("Fence")
@@ -167,7 +172,7 @@ struct ReportEditor: View {
                 drawingPicker("PE drawings on site", selection: $report.drawings_on_site)
                 drawingPicker("DOB / SCA approved", selection: $report.drawings_approved)
             }
-            Section("Actual attendees") {
+            Section("Attendees") {
                 ForEach($report.attendees) { $attendee in
                     VStack {
                         HStack { TextField("Name", text: $attendee.name); CompactRemoveButton(label: "Remove attendee") { report.attendees.removeAll { $0.id == attendee.id } } }
