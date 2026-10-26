@@ -22,14 +22,15 @@ function siteChoice(label,value,change,options,separator='; '){
   let selected=[...new Set((value||'').split(separator==='\n'?/\n/:/[;\n]/).map(v=>v.trim()).filter(Boolean))];
   let active=-1;
   const root=el('div',undefined,'multi-choice');
-  const search=el('input');search.type='search';search.placeholder=label;search.autocomplete='off';search.setAttribute('aria-label','Search '+label);search.setAttribute('role','combobox');search.setAttribute('aria-autocomplete','list');search.setAttribute('aria-expanded','false');root.append(search);
+  const search=el('input');search.type='search';search.placeholder=label;search.autocomplete='off';search.setAttribute('aria-label','Search '+label);search.setAttribute('role','combobox');search.setAttribute('aria-autocomplete','list');search.setAttribute('aria-expanded','false');const cell=el('div',undefined,'choice-cell');root.append(cell);
   const chosen=el('div',undefined,'choice-tags'),panel=el('div',undefined,'choice-panel'),choices=el('div',undefined,'choice-options'),custom=el('button',undefined,'choice-custom');
-  choices.id='choices-'+crypto.randomUUID();choices.setAttribute('role','listbox');choices.setAttribute('aria-label',label);choices.setAttribute('aria-multiselectable','true');search.setAttribute('aria-controls',choices.id);custom.type='button';panel.append(choices,custom);panel.hidden=true;root.append(chosen,panel);
+  choices.id='choices-'+crypto.randomUUID();choices.setAttribute('role','listbox');choices.setAttribute('aria-label',label);choices.setAttribute('aria-multiselectable','true');search.setAttribute('aria-controls',choices.id);custom.type='button';panel.append(choices,custom);panel.hidden=true;cell.append(chosen,search);root.append(panel);
   function open(){panel.hidden=false;search.setAttribute('aria-expanded','true');}
   function close(){panel.hidden=true;search.setAttribute('aria-expanded','false');search.removeAttribute('aria-activedescendant');active=-1;}
   function update(){change(selected.join(separator));markDirty();render();}
-  function toggle(option){if(selected.includes(option))selected=selected.filter(v=>v!==option);else selected=option==='NA'?['NA']:[...selected.filter(v=>v!=='NA'),option];update();}
+  function toggle(option){if(selected.includes(option))selected=selected.filter(v=>v!==option);else selected=option==='NA'?['NA']:[...selected.filter(v=>v!=='NA'),option];search.value='';active=-1;update();}
   function render(){
+    search.placeholder=selected.length?'':label;
     chosen.replaceChildren();for(const item of selected){const tag=el('span',undefined,'choice-tag');const remove=removeButton('Remove '+item);remove.onclick=()=>{toggle(item);search.focus();};tag.append(el('span',item),remove);chosen.append(tag);}chosen.hidden=!selected.length;
     choices.replaceChildren();const query=search.value.trim().toLowerCase(),matches=options.filter(v=>!query||v.toLowerCase().includes(query));
     matches.forEach((option,index)=>{
@@ -72,8 +73,8 @@ const attendeeCompanies=['NYC SCA','DSENY Engineering Services PC'];
 function renderAttendees(){
   const root=$('attendees');root.replaceChildren();if(!state.attendees.length)root.append(el('p','No attendees entered. Add the people who actually attended.','empty'));
   state.attendees.forEach((a,i)=>{
-    const row=el('div',undefined,'row');
-    const name=field('Name',a.name,v=>a.name=v);name.querySelector('input').placeholder='Name';row.append(name);
+    const row=el('div',undefined,'row attendee-row');
+    const name=field('Name',a.name,v=>a.name=v);name.classList.add('attendee-name');name.querySelector('input').placeholder='Name';row.append(name);
     row.append(siteChoice('Company / agency',a.company,v=>a.company=v,attendeeCompanies),siteChoice('Role',a.title,v=>a.title=v,attendeeRoles));
     const remove=removeButton('Remove attendee');remove.onclick=()=>{state.attendees.splice(i,1);renderAttendees();markDirty();};row.append(remove);root.append(row);
   });
@@ -88,7 +89,7 @@ if(!state.reports.length)root.append(el('p','Add a scaffold, shed or Other repor
   ['drawings_on_site','drawings_approved'].forEach((k,i)=>grid.append(field(i?'Drawings DOB/SCA approved?':'PE drawings on site?',r[k],v=>r[k]=v,{options:[['','Not confirmed'],['Yes','Yes'],['No','No'],['NA','NA']]})));
   r.site=r.site||{};
   if(r.equipment==='OT'){
-    card.append(field('Other inspection type',r.site.report_type||'Unknown / custom',v=>{r.site.report_type=v;renderReports();},{options:[['SOE','SOE (Support of Excavation)'],['Fall Protection','Fall Protection'],['Fence','Fence'],['Unknown / custom','Unknown / custom item']]}));
+    card.append(field('Other inspection type',r.site.report_type||'Unknown / custom',v=>{r.site.report_type=v;renderReports();},{options:[['Shoring','Shoring'],['SStab','SStab'],['SOE','SOE (Support of Excavation)'],['Fall Protection','Fall Protection'],['Fence','Fence'],['Unknown / custom','Unknown / custom item']]}));
     card.append(field('Item name (for unknown / custom)',r.site.other_name||'',v=>r.site.other_name=v));
     card.append(field('Description / inspection scope',r.site.details||'',v=>r.site.details=v,{type:'textarea'}));
   }
@@ -115,12 +116,12 @@ function hydrateCalendarReport(report){
   for(const key of ['report_type','other_name'])if(candidate[key]&&(calendarFieldMissing(report.site[key])||report.site[key]===filled['site_'+key])){report.site[key]=candidate[key];filled['site_'+key]=candidate[key];}
   state.calendarFilled.set(report,filled);
 }
-function applyCalendar(confirmDate=true,createReports=true){
+function applyCalendar(applyDates=false,createReports=true){
   const c=state.candidates;if(!c)return;
   if($('calendar-title').value)$('title').value=$('calendar-title').value;
   const fields=c.fields||{};
-  for(const key of ['client','project','request_date','requested_by','address'])if(fields[key]&&calendarFieldMissing($(key).value))$(key).value=fields[key];
-  if(fields.inspection_date&&(calendarFieldMissing($('inspection_date').value)||(confirmDate&&confirm(`Use calendar inspection date ${fields.inspection_date}?`))))$('inspection_date').value=fields.inspection_date;
+  for(const key of ['client','project','requested_by','address'])if(fields[key]&&calendarFieldMissing($(key).value))$(key).value=fields[key];
+  for(const key of ['inspection_date','request_date'])if(fields[key]&&(applyDates||calendarFieldMissing($(key).value)))$(key).value=fields[key];
   if(createReports){
     const candidates=c.equipment||[],current=state.reports[0];
     const blank=current&&['status','permit','inspection_code','locations','drawings_on_site','drawings_approved'].every(k=>calendarFieldMissing(current[k]))&&Object.values(current.site||{}).every(calendarFieldMissing)&&['open_items','source_references','photo_references'].every(k=>!(current[k]||[]).length);
@@ -164,8 +165,8 @@ function showCalendarCandidates(candidates,chooseSingle=true){
 }
 $('extract').onclick=()=>action(async()=>{
   showCalendarCandidates(await json('/calendar/extract',{method:'POST',json:{text:$('calendar_text').value}}));
-  applyCalendar(false);toast('Available calendar facts filled. Choose a subject if several are listed, review Report facts, then save.');
-});$('apply-calendar').onclick=()=>applyCalendar();
+  applyCalendar(true);toast('Available calendar facts filled. Choose a subject if several are listed, review Report facts, then save.');
+});$('apply-calendar').onclick=()=>applyCalendar(true);
 $('transcript-file').onchange=()=>action(async()=>{const file=$('transcript-file').files[0];if(!file)return;if(file.size>100000)throw new Error('Transcript text limit is 100,000 bytes.');$('transcript').value+=($('transcript').value?'\n\n':'')+await file.text();markDirty();$('transcript-file').value='';toast('Transcript imported. Review the text before adopting findings.');});
 $('upload').onchange=()=>action(async()=>{
   const files=[...$('upload').files];if(!files.length)return;
