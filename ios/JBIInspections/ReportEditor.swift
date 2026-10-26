@@ -111,6 +111,55 @@ struct CompactRemoveButton: View {
     }
 }
 
+struct OpenItemTextCell: View {
+    var label: String
+    @Binding var value: String
+    var options: [String] = []
+    @FocusState private var editing: Bool
+    private var matches: [String] {
+        let query = (value.components(separatedBy: "\n").last ?? "").lowercased()
+        let words = query.split(whereSeparator: { $0.isWhitespace })
+        return options.filter { option in words.allSatisfy { option.lowercased().contains(String($0)) } }
+    }
+    private func choose(_ option: String) {
+        var lines = value.components(separatedBy: "\n")
+        if !lines.isEmpty { lines.removeLast() }
+        if !lines.contains(option) { lines.append(option) }
+        lines.append("")
+        value = lines.joined(separator: "\n")
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.caption).fontWeight(.semibold).frame(height: 32, alignment: .bottomLeading)
+            ZStack(alignment: .topLeading) {
+                if value.isEmpty {
+                    Text(options.isEmpty ? label : options.joined(separator: "\n"))
+                        .foregroundStyle(.tertiary).padding(.horizontal, 5).padding(.vertical, 8)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+                TextEditor(text: $value).focused($editing).scrollContentBackground(.hidden)
+                    .accessibilityLabel(label)
+            }.font(.footnote).frame(height: 132).clipped()
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+            if editing && !matches.isEmpty {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(matches, id: \.self) { option in
+                            Button { choose(option) } label: {
+                                HStack(alignment: .top) {
+                                    Text(option).multilineTextAlignment(.leading).foregroundStyle(.primary)
+                                    Spacer(minLength: 4)
+                                    if value.components(separatedBy: "\n").contains(option) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                }.font(.caption).padding(.vertical, 8).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }.frame(maxHeight: 180)
+            }
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
 struct ReportEditor: View {
     @Binding var report: ReportDraft
     var reportSelection: Binding<String>? = nil
@@ -210,10 +259,10 @@ struct ReportEditor: View {
             }
             Section("Open items") {
                 ForEach($report.open_items) { $finding in
-                    VStack {
-                        HStack { TextField("Location / occurrence", text: $finding.location, axis: .vertical); CompactRemoveButton(label: "Remove open item") { report.open_items.removeAll { $0.id == finding.id } } }
-                        MultiChoiceField(label: "Suggested corrective actions", value: $finding.action, options: CorrectionOptions.byEquipment[report.equipment] ?? [], separator: "\n")
-                        TextField("Edit corrective action wording", text: $finding.action, axis: .vertical)
+                    HStack(alignment: .top, spacing: 10) {
+                        OpenItemTextCell(label: "Location / occurrence", value: $finding.location)
+                        OpenItemTextCell(label: "Corrective action", value: $finding.action, options: CorrectionOptions.byEquipment[report.equipment] ?? [])
+                        CompactRemoveButton(label: "Remove open item") { report.open_items.removeAll { $0.id == finding.id } }.padding(.top, 25)
                     }
                 }.onDelete { report.open_items.remove(atOffsets: $0) }
                 Button("Add open item") { report.open_items.append(Finding()) }
