@@ -26,8 +26,11 @@
 .findings-row>label,.findings-row>.action-autocomplete{min-width:0;margin:0}
 .action-autocomplete{position:relative;font-weight:400}
 .action-autocomplete>label{margin:0}
-.findings-row textarea{height:132px;min-height:132px;resize:none;font-size:13px;font-weight:400;line-height:1.6;margin-top:6px}
+.findings-row textarea{height:44px;min-height:44px;resize:none;font-size:13px;font-weight:400;line-height:1.6;margin-top:6px}
 .findings-row textarea::placeholder{color:#8b9791;opacity:1;font-weight:400}
 .findings-row>.remove-icon{margin-top:30px}
 .action-suggestions{top:100%;margin-top:4px;max-height:280px}
 @media(max-width:650px){.findings-row{grid-template-columns:minmax(0,1fr) 32px}.findings-row>label,.findings-row>.action-autocomplete{grid-column:1}.findings-row>.remove-icon{grid-column:2;grid-row:1}}
+
+.findings-row textarea{line-height:20px;white-space:pre;overflow:auto;scrollbar-width:none}
+.findings-row textarea::-webkit-scrollbar{display:none}
