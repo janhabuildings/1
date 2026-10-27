@@ -133,13 +133,13 @@ struct OpenItemTextCell: View {
             Text(label).font(.caption).fontWeight(.semibold).frame(height: 32, alignment: .bottomLeading)
             ZStack(alignment: .topLeading) {
                 if value.isEmpty {
-                    Text(options.isEmpty ? label : options.joined(separator: "\n"))
+                    Text(options.isEmpty ? label : "Corrective items")
                         .foregroundStyle(.tertiary).padding(.horizontal, 5).padding(.vertical, 8)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
                 TextEditor(text: $value).focused($editing).scrollContentBackground(.hidden)
                     .accessibilityLabel(label)
-            }.font(.footnote).frame(height: 132).clipped()
+            }.font(.footnote).frame(height: 44).clipped()
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
             if editing && !matches.isEmpty {
                 ScrollView {
