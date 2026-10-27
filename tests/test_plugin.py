@@ -141,4 +141,41 @@ class PluginPackage(unittest.TestCase):
                     self.assertEqual(list(message.iter_attachments())[0].get_payload(decode=True),contents)
                     self.assertNotIn('signed and sealed',handoff['body_html'])
 
+class EmailSpacing(unittest.TestCase):
+    def test_docx_spacing_is_inlined_without_stretching_tables_or_changing_words(self):
+        from docx import Document
+        from docx.shared import Pt
+        from lxml import html
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);doc=Document()
+            first=doc.add_paragraph('Keep  these words together.')
+            first.paragraph_format.space_before=Pt(6);first.paragraph_format.space_after=Pt(9);first.paragraph_format.line_spacing=1.5
+            cell=doc.add_table(rows=1,cols=1).cell(0,0)
+            cell.text='Table cell';cell.paragraphs[0].paragraph_format.space_before=Pt(0);cell.paragraphs[0].paragraph_format.space_after=Pt(0);cell.paragraphs[0].paragraph_format.line_spacing=1
+            doc.save(root/'source.docx')
+            source='<html><head><style>p {margin-bottom:12pt;line-height:115%}</style></head><body><p>Keep &nbsp;these <b>words</b> together.</p><table width="648"><tr><td style="padding:0in 0.08in"><p>Table cell</p></td></tr></table></body></html>'
+            (root/'source.html').write_text(source)
+            result=html.fromstring(runner.email_html(root/'source.html',root/'source.docx'))
+            first=result.xpath('//p')[0];css=first.get('style')
+            self.assertIn('margin-top:6pt;',css);self.assertIn('margin-bottom:9pt;',css);self.assertIn('line-height:1.5;',css)
+            self.assertIn('Keep \xa0these words together.',first.text_content())
+            self.assertEqual(first.find('b').text,'words')
+            self.assertIn('margin-top:0pt;',result.xpath('//td/p')[0].get('style'))
+            self.assertIn('margin-bottom:0pt;',result.xpath('//td/p')[0].get('style'))
+            self.assertIn('line-height:1;',result.xpath('//td/p')[0].get('style'))
+            table=result.xpath('//table')[0];self.assertEqual(table.get('width'),'648');self.assertEqual(table.get('cellspacing'),'0')
+            self.assertIn('width:648px;',table.get('style'));self.assertNotRegex(table.get('style'),r'(?:^|;)width:100%;')
+            self.assertEqual(result.xpath('//td')[0].get('style'),'padding:0in 0.08in')
+            self.assertIn('width:648px;',result.xpath('//div[@class="report-content"]')[0].get('style'))
+
+    def test_converter_spacing_is_inline_when_no_docx_is_supplied(self):
+        from lxml import html
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'sample.html'
+            path.write_text('<html><head><style>p {line-height:115%;margin-bottom:8pt}</style></head><body><p style="margin-bottom:0in;line-height:100%">Sentence</p><p>Table spacing</p></body></html>')
+            result=html.fromstring(runner.email_html(path))
+            self.assertIn('margin-top:0;',result.xpath('//p')[0].get('style'))
+            self.assertIn('line-height:100%;',result.xpath('//p')[0].get('style'))
+            self.assertIn('margin-bottom:8pt;',result.xpath('//p')[1].get('style'))
+
 if __name__=='__main__': unittest.main()
