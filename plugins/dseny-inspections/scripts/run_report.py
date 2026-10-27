@@ -140,24 +140,79 @@ def office_convert(docx, directory, kind, renderer):
     return reports.convert(docx,directory,'html:HTML (StarWriter)' if kind=='html' else 'pdf')
 
 
-def email_html(path):
+def email_html(path, source_docx=None):
+    from collections import defaultdict, deque
     from lxml import html
     tree=html.fromstring(path.read_text(encoding='utf-8-sig'))
     if tree.xpath('//img | //object | //iframe | //script | //link[@href] | //form'):
         raise RuntimeError('HTML references unsupported images, objects or external assets; embed them before drafting')
     for node in tree.xpath('//*[@src or @background]'):
         raise RuntimeError('HTML contains an unresolved resource')
-    # Page counters from the Word document do not belong in an inline report.
     for node in tree.xpath('//div[@title="footer"] | //meta[@name="author" or @name="changedby"]'):
         node.getparent().remove(node)
+
+    def declarations(value):
+        return {key.strip().lower(): val.strip() for item in value.split(';') if ':' in item for key,val in [item.split(':',1)]}
+    def apply(node, properties):
+        css=declarations(node.get('style',''));css.update(properties)
+        node.set('style',';'.join(key+':'+value for key,value in css.items())+';')
+    # Mail clients commonly discard head styles and supply their own paragraph
+    # margins. Inline the converter's base rule before applying direct formatting.
+    defaults={}
+    for style in tree.xpath('//style'):
+        for rule in re.finditer(r'(?:^|})\s*p\s*\{([^}]+)\}',style.text or ''):
+            defaults.update(declarations(rule[1]))
+    paragraphs=defaultdict(deque)
+    if source_docx is not None:
+        from docx import Document
+        from docx.oxml.ns import qn
+        from docx.text.paragraph import Paragraph
+        doc=Document(source_docx)
+        base=doc.styles.element.find(qn('w:docDefaults')+'/'+qn('w:pPrDefault')+'/'+qn('w:pPr')+'/'+qn('w:spacing'))
+        for node in doc.element.body.iter(qn('w:p')):
+            paragraph=Paragraph(node,doc);spacing={}
+            layers=[base];chain=[];style=paragraph.style;seen=set()
+            while style is not None and style.style_id not in seen:
+                seen.add(style.style_id);chain.append(style.element.find(qn('w:pPr')+'/'+qn('w:spacing')));style=style.base_style
+            layers.extend(reversed(chain));layers.append(node.find(qn('w:pPr')+'/'+qn('w:spacing')))
+            for layer in layers:
+                if layer is not None:spacing.update({etree.QName(key).localname:value for key,value in layer.attrib.items()})
+            css={}
+            for word,prop in [('before','margin-top'),('after','margin-bottom')]:
+                css[prop]=f'{int(spacing.get(word,"0"))/20:g}pt'
+                if word+'Lines' in spacing:css[prop]=f'{int(spacing[word+"Lines"])/100:g}em'
+            if 'line' in spacing:
+                rule=spacing.get('lineRule','auto');line=int(spacing['line'])
+                css['line-height']=f'{line/240:g}' if rule=='auto' else f'{line/20:g}pt'
+                if rule!='auto':css['mso-line-height-rule']='exactly' if rule=='exact' else 'at-least'
+            css['mso-margin-top-alt']=css['margin-top'];css['mso-margin-bottom-alt']=css['margin-bottom']
+            paragraphs[' '.join(paragraph.text.split())].append(css)
     body=tree.find('body')
-    if body is not None: body.set('style',(body.get('style','')+';margin:0;padding:0;width:100%;'))
+    if body is not None:apply(body,{'margin':'0','padding':'0'})
     for table in tree.xpath('//table'):
-        table.set('width','100%');table.set('style',table.get('style','')+';width:100%;border-collapse:collapse;table-layout:fixed;')
+        # Keep the DOCX converter's widths and column proportions, rather than
+        # stretching each table across the recipient's entire window.
+        css={'border-collapse':'collapse','border-spacing':'0','max-width':'100%','mso-table-lspace':'0pt','mso-table-rspace':'0pt'}
+        width=table.get('width','')
+        if width.isdigit():css['width']=width+'px'
+        table.set('cellspacing','0');apply(table,css)
     for paragraph in tree.xpath('//p'):
-        text=' '.join(paragraph.text_content().split())
-        if '39th Avenue' in text or '39 th Avenue' in text or ('347-730-6990' in text):
-            paragraph.set('style','margin:0 0 12pt 0;width:100%;background-color:#000000;color:#ffffff;padding:3pt;')
+        direct=declarations(paragraph.get('style',''))
+        css={'margin-top':'0','margin-bottom':'0','padding':'0',**defaults,**direct}
+        key=' '.join(paragraph.text_content().split())
+        if paragraphs[key]:
+            css.pop('margin',None)
+            css.update(paragraphs[key].popleft())
+        paragraph.set('style',';'.join(name+':'+value for name,value in css.items())+';')
+    widths=[int(table.get('width')) for table in tree.xpath('//table') if table.get('width','').isdigit()]
+    if body is not None and widths:
+        # Keep introductory sentences in the same text column as the tables.
+        # An inner wrapper also survives clients that discard the body element.
+        wrapper=html.Element('div',{'class':'report-content'})
+        apply(wrapper,{'width':f'{max(widths)}px','max-width':'100%','margin':'0','padding':'0'})
+        wrapper.text=body.text;body.text=None
+        for child in list(body):wrapper.append(child)
+        body.append(wrapper)
     return html.tostring(tree,encoding='unicode',method='html')
 
 
@@ -214,7 +269,7 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
             attachments=[]
             if data['status']=='OIs':
                 html_file=office_convert(docx,folder,'html',renderer)
-                content=email_html(html_file)
+                content=email_html(html_file,docx)
                 html_file.write_text(content,encoding='utf-8')
                 entry['html_file']=str(html_file)
             else:
