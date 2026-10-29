@@ -1,0 +1,10 @@
+{
+  "name": "jbi-inspection-storage",
+  "account_id": "ef138160cf84ce3a02c19ddd1d162b36",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-28",
+  "workers_dev": true,
+  "triggers": {"crons": ["0 6 * * *"]},
+  "d1_databases": [{"binding": "DB", "database_name": "jbi-inspections", "database_id": "ef65110f-a301-46ac-84b6-5c5738046505"}],
+  "r2_buckets": [{"binding": "FILES", "bucket_name": "jbi-inspection-files"}]
+}

@@ -1,0 +1,1 @@
+{"name":"jbi-inspection-storage","private":true,"type":"module","scripts":{"test":"node worker.test.mjs"}}

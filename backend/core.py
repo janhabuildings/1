@@ -91,7 +91,9 @@ class Store:
         if not row: raise KeyError('File not found')
         result=dict(row)
         path=Path(result['path']).resolve()
-        if not path.is_relative_to(self.root.resolve()) or not path.is_file(): raise KeyError('File unavailable')
+        if not path.is_relative_to(self.root.resolve()): raise KeyError('File unavailable')
+        if getattr(self,'cloud',None):self.cloud.materialize(path)
+        if not path.is_file(): raise KeyError('File unavailable')
         return result
 
 
