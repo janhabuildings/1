@@ -12,6 +12,8 @@ This gateway connects the existing Render app to the already-created D1 database
 6. Open the Worker's **Settings → Variables and Secrets → Add**. Select **Secret**, name it `STORAGE_TOKEN`, and copy the existing `INSPECTION_API_TOKEN` value from **Render → jbi-inspections → Environment** into it. Save/deploy the secret. Do not send this value in chat or commit it to GitHub.
 7. Copy the actual `https://jbi-inspection-storage.<your-subdomain>.workers.dev` URL. Share that URL with the assistant; it is not a credential.
 
+If an earlier build shows `main` and fails with `root directory not found`, it used the wrong branch. After saving the production branch and root settings above, a new push to the configured production branch starts a fresh build. Retrying an old build may reuse its original branch; check the branch label on the new build.
+
 A browser visit without authentication returns an authentication/configuration error. That is intentional, not a public report browser. With no STORAGE_TOKEN configured, every request returns 503 and no storage data is exposed.
 
 ## Activate the Render connection after the gateway is ready
