@@ -57,6 +57,7 @@ class ReportInput(BaseModel):
 
 
 class InspectionInput(BaseModel):
+    attendees: list[AttendeeInput] = Field(default_factory=list,max_length=50)
     title: str = Field(min_length=1,max_length=200)
     project: str = Field(default='',max_length=200)
     inspection_date: date
@@ -140,15 +141,37 @@ def create_app(settings=None):
     templates=TemplateManager(store)
     from backend import lifecycle,signatures
     lifecycle.initialize(store);signatures.initialize(store)
+    from backend.cloud_storage import CloudStorage,CloudStorageError,CloudConflict
+    cloud=CloudStorage.from_env(store,settings.token)
+    if cloud:
+        cloud.restore()
+        templates=TemplateManager(store)
+        store.cloud=cloud
+        cloud.sync()
+    storage_lock=asyncio.Lock()
     app=FastAPI(title='JBI Inspections',version='0.1.0',docs_url=None,redoc_url=None)
     app.state.store=store
     app.state.settings=settings
+    app.state.cloud=cloud
     web_root=Path(__file__).resolve().parent/'web'
     app.mount('/web',StaticFiles(directory=web_root),name='web')
 
     @app.middleware('http')
     async def response_headers(request,call_next):
-        response=await call_next(request)
+        if cloud and request.url.path not in ('/','/health') and not request.url.path.startswith('/web/'):
+            from fastapi.responses import JSONResponse
+            async with storage_lock:
+                try:
+                    response=await call_next(request)
+                    if request.method in ('POST','PUT','PATCH','DELETE') and response.status_code<400:
+                        await asyncio.to_thread(cloud.sync)
+                except CloudConflict as error:
+                    try:await asyncio.to_thread(cloud.restore)
+                    except CloudStorageError:pass
+                    response=JSONResponse({'detail':str(error)},status_code=409)
+                except CloudStorageError as error:
+                    response=JSONResponse({'detail':str(error)},status_code=503)
+        else:response=await call_next(request)
         response.headers['Cache-Control']='no-store'
         response.headers['X-Content-Type-Options']='nosniff'
         response.headers['Referrer-Policy']='no-referrer'
@@ -179,7 +202,7 @@ def create_app(settings=None):
     def capabilities():
         return {'cloud_ai_configured':bool(settings.ai_key),'semantic_search_configured':bool(settings.ai_key),
                 'gmail_direct_drafting':False,'system_mail_composer':True,
-                'phone_or_whatsapp_call_capture':False,'rendering_requires_review':True,'report_fonts':report_fonts}
+                'phone_or_whatsapp_call_capture':False,'rendering_requires_review':True,'report_fonts':report_fonts,'storage':'cloudflare' if cloud else 'temporary'}
 
     @app.get('/inspections',dependencies=[Depends(authorized)])
     def list_inspections(): return store.list()
@@ -187,6 +210,7 @@ def create_app(settings=None):
     @app.post('/inspections',status_code=201,dependencies=[Depends(authorized)])
     def create_inspection(data:InspectionInput):
         payload=json.loads(data.model_dump_json());payload['id']=uid()
+        if 'attendees' not in data.model_fields_set and payload['reports']:payload['attendees']=payload['reports'][0]['attendees']
         return store.save(payload)
 
     @app.get('/inspections/{identity}',dependencies=[Depends(authorized)])
@@ -208,6 +232,8 @@ def create_app(settings=None):
                 old=json.loads(previous['payload'])
                 for key in ('client','request_date','requested_by','address','subject_project'):
                     if key not in data.model_fields_set:payload[key]=old.get(key,'')
+                if 'attendees' not in data.model_fields_set:
+                    payload['attendees']=payload['reports'][0]['attendees'] if payload['reports'] else old.get('attendees',[])
             if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
@@ -258,6 +284,7 @@ def create_app(settings=None):
                 raise HTTPException(409,'Inspection or evidence was deleted during upload. Refresh before continuing.')
             existing=db.execute('SELECT * FROM media WHERE id=?',(identity_file,)).fetchone()
             if existing:
+                if cloud and existing['inspection_id']==identity:cloud.materialize(Path(existing['path']))
                 if existing['inspection_id']!=identity or (Path(existing['path']).exists() and Path(existing['path']).read_bytes()!=bytes(data)):
                     raise HTTPException(409,'Asset ID already belongs to different content')
                 if not Path(existing['path']).exists(): Path(existing['path']).write_bytes(data)
