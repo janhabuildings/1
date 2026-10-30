@@ -21,6 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Show Xcode version
         run: xcodebuild -version
+      - name: Verify calendar field filling and reopening
+        run: |
+          swiftc ios/JBIInspections/Models.swift ios/Tests/CalendarRegression.swift -o "$RUNNER_TEMP/calendar-regression"
+          "$RUNNER_TEMP/calendar-regression"
       - name: Compile iPhone simulator app
         run: |
           set -o pipefail
