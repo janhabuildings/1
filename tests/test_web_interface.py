@@ -43,6 +43,40 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#workspace').wait_for(state='visible')
         from playwright.sync_api import expect
         expect(self.page.locator('#save')).to_be_enabled()
+    def fill_calendar(self,text):
+        control=self.page.locator('#calendar-content')
+        if control.get_attribute('open') is None:control.locator('summary').click()
+        self.page.locator('#calendar_text').fill(text)
+
+    def test_collapsed_calendar_and_photo_capture_notes(self):
+        from playwright.sync_api import expect
+        from PIL import Image
+        import io
+        self.connect()
+        expect(self.page.locator('#calendar_text')).to_be_hidden()
+        text='Client: Calendar client\nProject: TEST\nRequest date: 10/20/2026'
+        self.fill_calendar(text)
+        self.page.locator('#extract').click()
+        expect(self.page.locator('#client')).to_have_value('Calendar client')
+        expect(self.page.locator('#calendar_text')).to_be_hidden()
+        self.page.locator('#calendar-content summary').click()
+        expect(self.page.locator('#calendar_text')).to_have_value(text)
+        self.page.locator('[data-tab=evidence]').click()
+        self.page.locator('#capture-location').fill('North elevation, bay 2')
+        self.page.locator('#capture-condition').fill('Loose plank')
+        data=io.BytesIO();Image.new('RGB',(16,16),'white').save(data,format='JPEG')
+        self.page.locator('#upload').set_input_files({'name':'capture.jpg','mimeType':'image/jpeg','buffer':data.getvalue()})
+        note=self.page.get_by_label('Location / observation',exact=True)
+        expect(note).to_have_value('Location: North elevation, bay 2\nCondition: Loose plank')
+        expect(self.page.locator('#capture-location')).to_have_value('')
+        identity=self.page.locator('#saved').input_value()
+        self.page.locator('[data-tab=inspection]').click()
+        self.page.locator('#refresh').click()
+        self.page.locator('#saved').select_option(identity)
+        self.page.locator('[data-tab=evidence]').click()
+        expect(note).to_have_value('Location: North elevation, bay 2\nCondition: Loose plank')
+        self.assertEqual(self.errors,[])
+
     def add_separate_report(self,equipment):
         control=self.page.locator('#separate-reports')
         if control.get_attribute('open') is None:control.locator('summary').click()
@@ -311,7 +345,7 @@ class WebWorkflow(unittest.TestCase):
         self.connect()
         first='2026-05-11 PS87Q Supported Scaffold-I-Inspection-OIs'
         second='2026-05-11 PS87Q Supported Scaffold-I-Inspection-No OIs'
-        self.page.locator('#calendar_text').fill(first+'\n'+second)
+        self.fill_calendar(first+'\n'+second)
         self.page.locator('#extract').click()
         expect(self.page.locator('#calendar-title-options')).to_be_visible()
         self.assertEqual(self.page.locator('#calendar-title').input_value(), '')
@@ -337,7 +371,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#inspection_date').fill('2026-10-24')
         self.page.locator('#request_date').fill('2026-10-20')
         title='2026-05-11 PS87Q Supported Scaffold-I-Inspection-OIs'
-        self.page.locator('#calendar_text').fill(title+'\nClient:\tCalendar client\tProject:\tPS87Q\nRequest date:\t05.06.2026\tInspected on:\t05.11.2026\tRequest by:\tExample Contact\nExample Company\nPermit#:\tQ01248704\nAddress:\t67-54 80 Street Qns NY')
+        self.fill_calendar(title+'\nClient:\tCalendar client\tProject:\tPS87Q\nRequest date:\t05.06.2026\tInspected on:\t05.11.2026\tRequest by:\tExample Contact\nExample Company\nPermit#:\tQ01248704\nAddress:\t67-54 80 Street Qns NY')
         self.page.locator('#extract').click()
         expect(self.page.locator('#project')).to_have_value('PS87Q')
         expect(self.page.locator('#request_date')).to_have_value('2026-05-06')
@@ -398,7 +432,7 @@ class WebWorkflow(unittest.TestCase):
 
     def test_calendar_candidates_do_not_choose_a_report_outcome(self):
         self.connect()
-        self.page.locator('#calendar_text').fill('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nRequested by:\tExample Contact\nExample Company\nAddress:\t123 Example Street\nPermit#:\tM00981443-I1 SF\nPE Drawings on site?\tYes | NA | No\nInspected on:\n10/15/2026\nM00981443-I1 SF')
+        self.fill_calendar('2026-10-15 TEST Supported Scaffold-VIII-Inspection-No OIs\nClient:\nCalendar Fixture\nProject:\nTEST\nRequested by:\tExample Contact\nExample Company\nAddress:\t123 Example Street\nPermit#:\tM00981443-I1 SF\nPE Drawings on site?\tYes | NA | No\nInspected on:\n10/15/2026\nM00981443-I1 SF')
         self.page.locator('#extract').click()
         self.page.locator('#calendar-candidates').wait_for(state='visible')
         from playwright.sync_api import expect
@@ -420,7 +454,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('[data-tab=reports]').click()
         self.page.locator('#add-SH').click()
         self.page.locator('[data-tab=inspection]').click()
-        self.page.locator('#calendar_text').fill((ROOT/'tests/fixtures/shoring_calendar.txt').read_text())
+        self.fill_calendar((ROOT/'tests/fixtures/shoring_calendar.txt').read_text())
         self.page.locator('#extract').click()
         expect(self.page.locator('#project')).to_have_value('G Washington HS')
         expect(self.page.locator('#extract')).to_be_enabled()
@@ -469,7 +503,7 @@ class WebWorkflow(unittest.TestCase):
     def test_calendar_shared_facts_survive_saving_before_a_report_exists(self):
         from playwright.sync_api import expect
         self.connect()
-        self.page.locator('#calendar_text').fill('Client: Fixture Client\nAddress: Fixture Address\nRequest by: Fixture Requester\nPermit#: M12345')
+        self.fill_calendar('Client: Fixture Client\nAddress: Fixture Address\nRequest by: Fixture Requester\nPermit#: M12345')
         self.page.locator('#extract').click()
         expect(self.page.locator('#client')).to_have_value('Fixture Client')
         expect(self.page.locator('#extract')).to_be_enabled()

@@ -29,12 +29,14 @@ import Foundation
         else { cache.inspections.insert(inspection, at: 0) }
         cache.dirty.insert(inspection.id); persist()
     }
-    func addMedia(_ data: Data, to inspection: Inspection, kind: String, mime: String, ext: String) throws {
+    @discardableResult
+    func addMedia(_ data: Data, to inspection: Inspection, kind: String, mime: String, ext: String) throws -> String {
         guard cache.inspections.contains(where: { $0.id == inspection.id }) else { throw APIError(message: "This inspection was deleted; evidence import stopped.") }
         var item = LocalMedia(inspectionID: inspection.id, kind: kind, relativePath: "", mime: mime)
         item.relativePath = item.id + "." + ext
         try data.write(to: directory.appendingPathComponent(item.relativePath), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         cache.media.append(item); cache.dirty.insert(inspection.id); persist()
+        return item.id
     }
     func mediaURL(_ item: LocalMedia) -> URL { directory.appendingPathComponent(item.relativePath) }
     var connected: Bool { !SecureToken.read().isEmpty }

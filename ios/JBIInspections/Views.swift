@@ -123,6 +123,12 @@ struct InspectionDetail: View {
     @StateObject private var audio = AudioCapture()
     @Environment(\.scenePhase) private var phase
     @State private var camera = false
+    @State private var calendarExpanded = false
+    @State private var capturedPhotoID: String?
+    @State private var showPhotoNotes = false
+    @State private var photoLocation = ""
+    @State private var photoCondition = ""
+    @State private var photoEquipment = ""
     @State private var photoSelection: [PhotosPickerItem] = []
     @State private var importFile = false
     @State private var recordConsent = false
@@ -207,11 +213,13 @@ struct InspectionDetail: View {
             }
             if let export { artifacts(export) }
             if !suggestions.isEmpty {
-                Section("Candidates and analysis details") {
+                Section {
+                  DisclosureGroup("Candidates and analysis details") {
                     Text(suggestions).font(.caption).textSelection(.enabled)
                     if calendarCandidates != nil {
                         Button("Fill missing fields again") { applyCalendar() }
                     }
+                  }
                 }
             }
             if !status.isEmpty { Section { Text(status).font(.caption).textSelection(.enabled) } }
@@ -245,7 +253,10 @@ struct InspectionDetail: View {
         .confirmationDialog(confirmationTitle, isPresented: Binding(get: { confirmationPresented }, set: { if !$0 { clearConfirmation() } }), titleVisibility: .visible) {
             confirmationButtons
         } message: { Text(confirmationMessage) }
-        .sheet(isPresented: $camera) { CameraView(captured: savePhoto).ignoresSafeArea() }
+        .sheet(isPresented: $camera, onDismiss: {
+            if capturedPhotoID != nil { showPhotoNotes = true }
+        }) { CameraView(captured: saveCapturedPhoto).ignoresSafeArea() }
+        .sheet(isPresented: $showPhotoNotes, onDismiss: { capturedPhotoID = nil }) { photoNotes }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
         .quickLookPreview($reportPreviewURL)
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments, sender: $0.sender, to: $0.to, cc: $0.cc) }
@@ -323,8 +334,10 @@ struct InspectionDetail: View {
                 }
             }
             TextField("Inspection date · YYYY-MM-DD", text: $inspection.inspection_date)
-            Text("Paste the complete calendar entry below.").font(.caption)
-            TextEditor(text: $inspection.calendar_text).frame(minHeight: 140).accessibilityLabel("Calendar content")
+            DisclosureGroup(inspection.calendar_text.isEmpty ? "Calendar content · paste entry" : "Calendar content · tap to view or edit", isExpanded: $calendarExpanded) {
+                Text("Paste the complete calendar entry below.").font(.caption)
+                TextEditor(text: $inspection.calendar_text).frame(height: 160).accessibilityLabel("Calendar content")
+            }
             Button(busy ? "Extracting calendar…" : "Extract and fill report fields") { extract() }
                 .disabled(busy || inspection.calendar_text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             if !calendarStatus.isEmpty { Text(calendarStatus).font(.caption).textSelection(.enabled) }
@@ -353,6 +366,7 @@ struct InspectionDetail: View {
                 }
             }
             PhotosPicker(selection: $photoSelection, maxSelectionCount: 100, matching: .images) { Label("Import photos", systemImage: "photo") }
+            Text("After taking a photo, add its location, condition and equipment. Notes remain editable with the photo.").font(.caption).foregroundStyle(.secondary)
             Button(audio.recording ? "Stop recording" : "Record on-site conversation", systemImage: audio.recording ? "stop.circle.fill" : "mic") {
                 if audio.recording { finishRecording() } else { recordConsent = true }
             }.foregroundStyle(audio.recording ? Color.red : Color.accentColor)
@@ -471,11 +485,48 @@ struct InspectionDetail: View {
         candidates.fill(&report, inspection: inspection, selectedTitle: selectedCalendarTitle)
         inspection.reports.append(report)
     }
-    private func savePhoto(_ image: UIImage) {
+    private var photoNotes: some View {
+        NavigationStack {
+            Form {
+                if let id = capturedPhotoID, let item = store.cache.media.first(where: { $0.id == id }),
+                   let image = evidenceImage(store.mediaURL(item).path) {
+                    Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 220)
+                }
+                Section("Photo notes") {
+                    TextField("Location · floor, elevation, bay", text: $photoLocation, axis: .vertical)
+                    TextField("Condition / observation", text: $photoCondition, axis: .vertical)
+                    Picker("Equipment", selection: $photoEquipment) {
+                        Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
+                    }
+                    Text("Photo saved on this phone. Notes save as you type; cloud sync follows when connected.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Photo details")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPhotoNotes = false } } }
+            .onChange(of: photoLocation) { _, _ in saveCapturedPhotoNotes() }
+            .onChange(of: photoCondition) { _, _ in saveCapturedPhotoNotes() }
+            .onChange(of: photoEquipment) { _, _ in saveCapturedPhotoNotes() }
+        }
+    }
+    private func saveCapturedPhoto(_ image: UIImage) {
+        photoLocation = ""; photoCondition = ""; photoEquipment = ""
+        capturedPhotoID = savePhoto(image)
+    }
+    private func saveCapturedPhotoNotes() {
+        guard let id = capturedPhotoID, let index = store.cache.media.firstIndex(where: { $0.id == id }) else { return }
+        let location = photoLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let condition = photoCondition.trimmingCharacters(in: .whitespacesAndNewlines)
+        store.cache.media[index].note = [location.isEmpty ? "" : "Location: " + location, condition.isEmpty ? "" : "Condition: " + condition].filter { !$0.isEmpty }.joined(separator: "\n")
+        store.cache.media[index].equipment = photoEquipment
+        store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync()
+    }
+    @discardableResult
+    private func savePhoto(_ image: UIImage) -> String? {
         do {
             guard let data = image.jpegData(compressionQuality: 0.85) else { throw APIError(message: "Could not encode photo.") }
-            try store.addMedia(data, to: inspection, kind: "photo", mime: "image/jpeg", ext: "jpg"); scheduleSync()
-        } catch { store.error = error.localizedDescription }
+            let id = try store.addMedia(data, to: inspection, kind: "photo", mime: "image/jpeg", ext: "jpg"); scheduleSync()
+            return id
+        } catch { store.error = error.localizedDescription; return nil }
     }
     private func finishRecording() {
         guard let url = audio.stop() else { return }
@@ -535,6 +586,7 @@ struct InspectionDetail: View {
             do {
                 let data = try await store.api.json("/calendar/extract", object: ["text": inspection.calendar_text])
                 calendarCandidates = try JSONDecoder().decode(CalendarCandidates.self, from: data)
+                calendarExpanded = false
                 let titles = calendarCandidates?.titles ?? []
                 selectedCalendarTitle = titles.contains(inspection.title) ? inspection.title : (titles.count == 1 ? titles[0] : "")
                 // No outcome or drawing approval is inferred.
