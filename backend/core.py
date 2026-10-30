@@ -130,6 +130,11 @@ def calendar_candidates(text):
     lines = flattened
     values = {}; key = None
     for line in lines:
+        # Common inspection facts end at the actual attendee table. In an
+        # unfilled full template, the later certification's Company / Date
+        # labels must not turn into a client named "Date".
+        if re.match(r'^(?:section\s*2\s+attendees\b|attendees\s+names\s*:?\s*$)', line, re.I):
+            break
         match = label_re.match(line)
         if match:
             key = lookup[match.group(1).casefold()]
