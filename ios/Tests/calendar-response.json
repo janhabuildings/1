@@ -1,0 +1,64 @@
+{
+  "fields": {
+    "client": "Keltech",
+    "project": "G Washington HS",
+    "request_date": "2026-10-16",
+    "inspection_date": "2026-10-22",
+    "requested_by": "Example Requester",
+    "address": "549 Audubon Avenue Mn NY"
+  },
+  "equipment": [
+    {
+      "equipment": "OT",
+      "inspection_date": "2026-10-23",
+      "subject_project": "G Washington (M465)",
+      "report_type": "Unknown / custom"
+    }
+  ],
+  "titles": [
+    "2026-10-23 G Washington (M465) Main Building Interior Shoring-V-Inspection-OIs",
+    "2026-10-23 G Washington (M465) Main Building Interior Shoring-V-Inspection - PE CERT OF USE",
+    "2026-10-23 G Washington (M465) Field House Interior Shoring-VI-Inspection-OIs",
+    "2026-10-23 G Washington (M465) Field House Interior Shoring-VI-Inspection- PE CERT OF USE"
+  ],
+  "report_subjects": [
+    {
+      "title": "2026-10-23 G Washington (M465) Main Building Interior Shoring-V-Inspection-OIs",
+      "equipment": "OT",
+      "inspection_date": "2026-10-23",
+      "inspection_code": "V",
+      "subject_project": "G Washington (M465)",
+      "other_name": "Main Building Interior Shoring",
+      "report_type": "Unknown / custom"
+    },
+    {
+      "title": "2026-10-23 G Washington (M465) Main Building Interior Shoring-V-Inspection - PE CERT OF USE",
+      "equipment": "OT",
+      "inspection_date": "2026-10-23",
+      "inspection_code": "V",
+      "subject_project": "G Washington (M465)",
+      "other_name": "Main Building Interior Shoring",
+      "report_type": "Unknown / custom"
+    },
+    {
+      "title": "2026-10-23 G Washington (M465) Field House Interior Shoring-VI-Inspection-OIs",
+      "equipment": "OT",
+      "inspection_date": "2026-10-23",
+      "inspection_code": "VI",
+      "subject_project": "G Washington (M465)",
+      "other_name": "Field House Interior Shoring",
+      "report_type": "Unknown / custom"
+    },
+    {
+      "title": "2026-10-23 G Washington (M465) Field House Interior Shoring-VI-Inspection- PE CERT OF USE",
+      "equipment": "OT",
+      "inspection_date": "2026-10-23",
+      "inspection_code": "VI",
+      "subject_project": "G Washington (M465)",
+      "other_name": "Field House Interior Shoring",
+      "report_type": "Unknown / custom"
+    }
+  ],
+  "confirmed": false,
+  "notice": "Calendar template alternatives are not inspection results. Confirm all candidates."
+}
