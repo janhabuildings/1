@@ -3,6 +3,28 @@ from backend.core import calendar_candidates
 
 
 class CalendarExtraction(unittest.TestCase):
+    def test_unfilled_full_template_has_no_calendar_facts(self):
+        value = calendar_candidates('''YYYY-MM-MM Project/Location Sidewalk Shed-RMN#-Inspection-OIs
+Client:\t \tProject:\t 
+Request date:\t\tInspected on:\t\tRequest by:\t
+Product Inspected:\tSidewalk Shed
+Supported Scaffold
+Other
+Permit#:\t\tContractor is responsible for ensuring all permits are kept current.
+Address:\t
+PE Drawings on site?\tYes | NA | No
+Drawings DOB/SCA approved?\tYes | NA | No
+Section 2\tAttendees Names\tCompany Agency\tTitle
+10.\tExample Template Engineer\tDSENY Engineering Services PC\tPE
+Section 5, Client certification of completion of Open Items
+Print Name\t
+Company\t
+Date\t
+END OF OTHER REPORT''')
+        self.assertEqual(value['fields'], {})
+        self.assertEqual(value['equipment'], [])
+        self.assertEqual(value['titles'], [])
+
     def test_inline_wrapped_contact_address_and_equipment_permits(self):
         value = calendar_candidates('''2026-10-24 PS87Q Supported Scaffold-II-Inspection-OIs
 CLIENT: Example Contractor

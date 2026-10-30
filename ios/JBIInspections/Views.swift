@@ -134,6 +134,7 @@ struct InspectionDetail: View {
     @State private var analysisChecks: [String] = []
     @State private var calendarCandidates: CalendarCandidates?
     @State private var selectedCalendarTitle = ""
+    @State private var calendarStatus = ""
     @State private var export: ExportResult?
     @State private var share: SharedItems?
     @State private var reportPreviewURL: URL?
@@ -235,6 +236,8 @@ struct InspectionDetail: View {
             }
         }
         .task {
+            calendarCandidates = inspection.calendar_candidates
+            if let candidates = calendarCandidates, candidates.titles?.contains(inspection.title) == true { selectedCalendarTitle = inspection.title }
             if store.connected {
                 do { export = try JSONDecoder().decode(ExportResult.self, from: await store.api.request("/inspections/\(inspection.id)/artifacts")) } catch { }
             }
@@ -322,14 +325,20 @@ struct InspectionDetail: View {
             TextField("Inspection date · YYYY-MM-DD", text: $inspection.inspection_date)
             Text("Paste the complete calendar entry below.").font(.caption)
             TextEditor(text: $inspection.calendar_text).frame(minHeight: 140).accessibilityLabel("Calendar content")
-            Button("Extract calendar candidates") { extract() }.disabled(busy)
+            Button(busy ? "Extracting calendar…" : "Extract and fill report fields") { extract() }
+                .disabled(busy || inspection.calendar_text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if !calendarStatus.isEmpty { Text(calendarStatus).font(.caption).textSelection(.enabled) }
+            if let value = inspection.client, !value.isEmpty { LabeledContent("Client", value: value) }
+            if let value = inspection.request_date, !value.isEmpty { LabeledContent("Request date", value: value) }
+            if let value = inspection.requested_by, !value.isEmpty { LabeledContent("Requested by", value: value) }
+            if let value = inspection.address, !value.isEmpty { LabeledContent("Address", value: value) }
             if let titles = calendarCandidates?.titles, !titles.isEmpty {
                 Picker("Inspection title from calendar", selection: $selectedCalendarTitle) {
                     Text("Choose a title…").tag("")
                     ForEach(titles, id: \.self) { title in Text(title).tag(title) }
                 }.pickerStyle(.menu)
-                    .onChange(of: selectedCalendarTitle) { _, title in
-                        if !title.isEmpty { inspection.title = title; store.save(inspection) }
+                    .onChange(of: selectedCalendarTitle) { previous, title in
+                        if !title.isEmpty { applyCalendar(previousTitle: previous) }
                     }
                 Text("Choose a title when several are listed. Calendar dates fill on extraction. Review the dates and confirm the report outcome separately.").font(.caption)
             }
@@ -458,6 +467,8 @@ struct InspectionDetail: View {
     private func addReport(_ type: String) {
         var report = ReportDraft(equipment: type)
         report.project = inspection.project; report.inspection_date = inspection.inspection_date
+        let candidates = calendarCandidates ?? inspection.calendar_candidates ?? CalendarCandidates(fields: [:], equipment: [])
+        candidates.fill(&report, inspection: inspection, selectedTitle: selectedCalendarTitle)
         inspection.reports.append(report)
     }
     private func savePhoto(_ image: UIImage) {
@@ -519,7 +530,8 @@ struct InspectionDetail: View {
     }
     private func extract() {
         Task {
-            busy = true; defer { busy = false }
+            busy = true; calendarStatus = "Extracting calendar details…"
+            defer { busy = false }
             do {
                 let data = try await store.api.json("/calendar/extract", object: ["text": inspection.calendar_text])
                 calendarCandidates = try JSONDecoder().decode(CalendarCandidates.self, from: data)
@@ -529,46 +541,27 @@ struct InspectionDetail: View {
                 let object = try JSONSerialization.jsonObject(with: data)
                 let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
                 suggestions = String(data: pretty, encoding: .utf8) ?? ""
-                applyCalendar(clearCandidates: false, applyDates: true)
+                applyCalendar(applyDates: true)
                 store.save(inspection)
                 scheduleSync()
-                status = "Calendar details filled and saved on this phone. Review the fields and choose a title if several are listed. Calendar inspection and request dates were filled; other existing facts were kept."
-            } catch { store.error = error.localizedDescription }
-        }
-    }
-    private func calendarFieldMissing(_ value: String) -> Bool {
-        ["", "[pending confirmation]", "pending", "tbd"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
-    }
-    private func applyCalendar(clearCandidates: Bool = true, applyDates: Bool = false) {
-        guard let candidates = calendarCandidates else { return }
-        if !selectedCalendarTitle.isEmpty { inspection.title = selectedCalendarTitle }
-        if let value = candidates.fields["project"], calendarFieldMissing(inspection.project) { inspection.project = value }
-        if let value = candidates.fields["inspection_date"], applyDates || calendarFieldMissing(inspection.inspection_date) { inspection.inspection_date = value }
-        for item in candidates.equipment {
-            if let equipment = item["equipment"], !inspection.reports.contains(where: { $0.equipment == equipment }) { addReport(equipment) }
-        }
-        for index in inspection.reports.indices {
-            if calendarFieldMissing(inspection.reports[index].client) { inspection.reports[index].client = candidates.fields["client"] ?? "" }
-            if calendarFieldMissing(inspection.reports[index].project) { inspection.reports[index].project = candidates.fields["project"] ?? inspection.project }
-            if calendarFieldMissing(inspection.reports[index].requested_by) { inspection.reports[index].requested_by = candidates.fields["requested_by"] ?? "" }
-            if calendarFieldMissing(inspection.reports[index].address) { inspection.reports[index].address = candidates.fields["address"] ?? "" }
-            if let date = candidates.fields["request_date"], applyDates || calendarFieldMissing(inspection.reports[index].request_date) { inspection.reports[index].request_date = date }
-            if (applyDates && candidates.fields["inspection_date"] != nil) || calendarFieldMissing(inspection.reports[index].inspection_date) { inspection.reports[index].inspection_date = inspection.inspection_date }
-            if calendarFieldMissing(inspection.reports[index].drawings_on_site) { inspection.reports[index].drawings_on_site = candidates.fields["drawings_on_site"] ?? "" }
-            if calendarFieldMissing(inspection.reports[index].drawings_approved) { inspection.reports[index].drawings_approved = candidates.fields["drawings_approved"] ?? "" }
-            if inspection.reports.count == 1 && calendarFieldMissing(inspection.reports[index].permit) { inspection.reports[index].permit = candidates.fields["permit"] ?? "" }
-            if let item = candidates.equipment.first(where: { $0["equipment"] == inspection.reports[index].equipment }) {
-                if calendarFieldMissing(inspection.reports[index].permit) { inspection.reports[index].permit = item["permit"] ?? "" }
-                if calendarFieldMissing(inspection.reports[index].inspection_code) { inspection.reports[index].inspection_code = item["inspection_code"] ?? "" }
-                if calendarFieldMissing(inspection.reports[index].subject_project) { inspection.reports[index].subject_project = item["subject_project"] ?? "" }
-                for key in ["report_type", "other_name"] {
-                    if let value = item[key], calendarFieldMissing(inspection.reports[index].site[key] ?? "") { inspection.reports[index].site[key] = value }
-                }
+                let count = calendarCandidates?.fields.count ?? 0
+                let subjects = calendarCandidates?.equipment.count ?? 0
+                calendarStatus = count == 0 && subjects == 0
+                    ? "No usable calendar facts found. Check that the full entry includes labels such as Client, Project, Request date and Inspected on."
+                    : "Extracted \(count) common facts and \(subjects) report types. Details are saved below and in Report facts. Review existing entries; they are preserved."
+                if inspection.reports.isEmpty && count > 0 { calendarStatus += " Add a scaffold, shed or Other report to use these facts." }
+                status = calendarStatus
+            } catch {
+                calendarStatus = "Calendar extraction failed: " + error.localizedDescription
+                store.error = calendarStatus
             }
         }
-        if clearCandidates { calendarCandidates = nil }
+    }
+    private func applyCalendar(applyDates: Bool = false, previousTitle: String = "") {
+        guard let candidates = calendarCandidates ?? inspection.calendar_candidates else { return }
+        candidates.apply(to: &inspection, selectedTitle: selectedCalendarTitle, previousTitle: previousTitle, applyDates: applyDates)
         store.save(inspection)
-        status = "Calendar details filled and saved. Review dates, result and drawing status."
+        scheduleSync()
     }
     private func analyze() {
         suggestedFindings = []; analysisChecks = []
