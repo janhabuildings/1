@@ -162,7 +162,7 @@ struct InspectionDetail: View {
     @State private var deleteThisInspection = false
     @Environment(\.dismiss) private var closeInspection
 
-    var body: some View {
+    private var inspectionForm: some View {
         Form {
             basics
             attendeesSection
@@ -231,7 +231,9 @@ struct InspectionDetail: View {
             }
             if !status.isEmpty { Section { Text(status).font(.caption).textSelection(.enabled) } }
         }
-        .navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
+    }
+    private var editingScreen: some View {
+        inspectionForm.navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
         .navigationDestination(for: ReportRoute.self) { route in
             ReportFactsEditor(inspection: $inspection, candidates: calendarCandidates ?? inspection.calendar_candidates, initialEquipment: route.equipment)
         }
@@ -240,14 +242,10 @@ struct InspectionDetail: View {
         .onChange(of: inspection.client) { _, _ in inspection.refreshTitle() }
         .onChange(of: inspection.inspection_date) { _, _ in inspection.refreshTitle() }
         .onChange(of: inspection.equipmentTitleKey) { _, _ in inspection.refreshTitle() }
-        .onChange(of: inspection.reports.map { $0.equipment + "|" + $0.status + "|" + ($0.calendar_title ?? "") + "|" + String($0.stamp_requested ?? false) }) { old, new in
-            let changed = Set(new.filter { !old.contains($0) }.map { String($0.split(separator: "|")[0]) })
-            if var files = export {
-                files.artifacts.removeAll { changed.contains($0.equipment) }
-                files.reports.removeAll { row in if case let .string(equipment)? = row["equipment"] { return changed.contains(equipment) }; return false }
-                export = files
-            }
-        }
+        .onChange(of: reportReviewKeys) { old, new in invalidateChangedReports(old: old, new: new) }
+    }
+    private var captureScreen: some View {
+        editingScreen
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
         .onDisappear { finishRecording() }
         .onChange(of: photoSelection) { _, items in
@@ -270,7 +268,9 @@ struct InspectionDetail: View {
                 do { export = try JSONDecoder().decode(ExportResult.self, from: await store.api.request("/inspections/\(inspection.id)/artifacts")) } catch { }
             }
         }
-        .confirmationDialog(confirmationTitle, isPresented: Binding(get: { confirmationPresented }, set: { if !$0 { clearConfirmation() } }), titleVisibility: .visible) {
+    }
+    var body: some View {
+        captureScreen.confirmationDialog(confirmationTitle, isPresented: Binding(get: { confirmationPresented }, set: { if !$0 { clearConfirmation() } }), titleVisibility: .visible) {
             confirmationButtons
         } message: { Text(confirmationMessage) }
         .sheet(isPresented: $camera, onDismiss: {
@@ -294,6 +294,20 @@ struct InspectionDetail: View {
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments, sender: $0.sender, to: $0.to, cc: $0.cc) }
         .sheet(isPresented: $showText) { TextDraft(body: "\(inspection.project) — inspection \(inspection.inspection_date)\n\(inspection.notes)") }
         .fileImporter(isPresented: $importFile, allowedContentTypes: [.audio, .plainText], allowsMultipleSelection: false, onCompletion: importMedia)
+    }
+    private var reportReviewKeys: [String] {
+        inspection.reports.map { $0.equipment + "|" + $0.status + "|" + ($0.calendar_title ?? "") + "|" + String($0.stamp_requested ?? false) }
+    }
+    private func invalidateChangedReports(old: [String], new: [String]) {
+        let changed = Set(new.filter { !old.contains($0) }.map { String($0.split(separator: "|")[0]) })
+        if var files = export {
+            files.artifacts.removeAll { changed.contains($0.equipment) }
+            files.reports.removeAll { row in
+                if case let .string(equipment)? = row["equipment"] { return changed.contains(equipment) }
+                return false
+            }
+            export = files
+        }
     }
     private var confirmationPresented: Bool {
         deleteThisInspection || removeMediaID != nil || removeReportType != nil || removeArtifactID != nil || stampConsent || recordConsent || aiConsent
