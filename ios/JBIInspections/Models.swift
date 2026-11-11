@@ -55,6 +55,46 @@ struct Inspection: Codable, Equatable, Identifiable {
     var address: String?
     var subject_project: String?
     var calendar_candidates: CalendarCandidates?
+    var attendees: [Attendee]?
+
+    var sharedAttendees: [Attendee] {
+        get {
+            if let attendees { return attendees }
+            return reports.flatMap(\.attendees).reduce(into: []) { result, person in
+                if !result.contains(where: { $0.id == person.id || ($0.name == person.name && $0.company == person.company && $0.title == person.title) }) { result.append(person) }
+            }
+        }
+        set {
+            attendees = newValue
+            for index in reports.indices { reports[index].attendees = newValue }
+        }
+    }
+    mutating func prepareAttendees(previousClient: String? = nil) {
+        var people = sharedAttendees
+        if attendees == nil && people.isEmpty {
+            people = [Attendee(company: client ?? "", title: "Competent Person/Site Supervisor"),
+                      Attendee(company: "NYC SCA", title: "Safety Inspector"),
+                      Attendee(name: "Kamruz Zaman", company: "DSENY Engineering Services PC", title: "PE")]
+        }
+        if let first = people.first, first.title == "Competent Person/Site Supervisor",
+           first.company.isEmpty || (previousClient != nil && first.company == previousClient), let client, !client.isEmpty {
+            people[0].company = client
+        }
+        sharedAttendees = people
+    }
+    mutating func insertAttendee(_ person: Attendee) {
+        var people = sharedAttendees
+        let last = people.last
+        let index = last?.company == "DSENY Engineering Services PC" && last?.title == "PE" ? max(0, people.count - 1) : people.count
+        people.insert(person, at: index); sharedAttendees = people
+    }
+    // Called only for a user's title selection, never merely parsing a template.
+    mutating func confirmCalendarTitle(_ title: String, candidates: CalendarCandidates?) {
+        guard let row = candidates?.report_subjects?.first(where: { $0["title"] == title }),
+              let index = reports.firstIndex(where: { $0.equipment == row["equipment"] }) else { return }
+        if title.range(of: #"-\s*(?:No\s+OIs|PE\s+CERT\s+OF\s+USE)\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil { reports[index].status = "No OIs" }
+        else if title.range(of: #"-\s*OIs\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil { reports[index].status = "OIs" }
+    }
 }
 struct LocalMedia: Codable, Equatable, Identifiable {
     var id = UUID().uuidString
@@ -161,6 +201,7 @@ struct CalendarCandidates: Codable, Equatable {
     }
 
     func apply(to inspection: inout Inspection, selectedTitle: String = "", previousTitle: String = "", applyDates: Bool = false) {
+        let previousClient = inspection.client
         inspection.calendar_candidates = self
         if !selectedTitle.isEmpty { inspection.title = selectedTitle }
         if Self.missing(inspection.project) { inspection.project = fields["project"] ?? "" }
@@ -174,6 +215,7 @@ struct CalendarCandidates: Codable, Equatable {
         }
         let snapshot = inspection
         for index in inspection.reports.indices { fill(&inspection.reports[index], inspection: snapshot, selectedTitle: selectedTitle, previousTitle: previousTitle, applyDates: applyDates) }
+        inspection.prepareAttendees(previousClient: previousClient)
     }
 }
 
