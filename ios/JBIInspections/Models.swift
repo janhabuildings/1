@@ -30,6 +30,7 @@ struct ReportDraft: Codable, Equatable, Identifiable {
     var drawings_on_site = ""
     var drawings_approved = ""
     var attendees: [Attendee] = []
+    var attendees_override: Bool?
     var site: [String: String] = [:]
     var open_items: [Finding] = []
     var source_references: [String] = []
@@ -60,13 +61,13 @@ struct Inspection: Codable, Equatable, Identifiable {
 
     var sharedAttendees: [Attendee] {
         get {
-            return reports.flatMap(\.attendees).reduce(into: attendees ?? []) { result, person in
+            return reports.filter { $0.attendees_override != true }.flatMap(\.attendees).reduce(into: attendees ?? []) { result, person in
                 if !result.contains(where: { $0.id == person.id || ($0.name == person.name && $0.company == person.company && $0.title == person.title) }) { result.append(person) }
             }
         }
         set {
             attendees = newValue
-            for index in reports.indices { reports[index].attendees = newValue }
+            for index in reports.indices where reports[index].attendees_override != true { reports[index].attendees = newValue }
         }
     }
     mutating func prepareAttendees(previousClient: String? = nil) {

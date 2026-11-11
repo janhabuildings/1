@@ -50,6 +50,7 @@ class ReportInput(BaseModel):
     drawings_on_site: Literal['','Yes','No','NA','[Pending confirmation]'] = ''
     drawings_approved: Literal['','Yes','No','NA','[Pending confirmation]'] = ''
     attendees: list[AttendeeInput] = Field(default_factory=list,max_length=50)
+    attendees_override: bool = False
     site: dict[str,str] = Field(default_factory=dict)
     open_items: list[FindingInput] = Field(default_factory=list,max_length=100)
     source_references: list[str] = Field(default_factory=list)
@@ -75,6 +76,7 @@ class InspectionInput(BaseModel):
 def merge_report_attendees(reports, fallback=None):
     people=[]
     for report in reports:
+        if report.get('attendees_override'):continue
         for person in report['attendees']:
             if not any(row['id']==person['id'] or all(row[key]==person[key] for key in ('name','company','title')) for row in people):people.append(person)
     return people or (fallback or [])
@@ -219,7 +221,8 @@ def create_app(settings=None):
     def create_inspection(data:InspectionInput):
         payload=json.loads(data.model_dump_json());payload['id']=uid()
         if 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
-        for report in payload['reports']:report['attendees']=payload['attendees']
+        for report in payload['reports']:
+            if not report['attendees_override']:report['attendees']=payload['attendees']
         return store.save(payload)
 
     @app.get('/inspections/{identity}',dependencies=[Depends(authorized)])
@@ -239,6 +242,10 @@ def create_app(settings=None):
             previous=db.execute('SELECT payload FROM inspections WHERE id=?',(identity,)).fetchone()
             if previous:
                 old=json.loads(previous['payload'])
+                old_reports={report['equipment']:report for report in old.get('reports',[])}
+                for incoming,report in zip(data.reports,payload['reports']):
+                    if 'attendees_override' not in incoming.model_fields_set and old_reports.get(report['equipment'],{}).get('attendees_override'):
+                        report['attendees_override']=True
                 for key in ('client','request_date','requested_by','address','subject_project'):
                     if key not in data.model_fields_set:payload[key]=old.get(key,'')
                 if 'attendees' not in data.model_fields_set:
@@ -246,7 +253,8 @@ def create_app(settings=None):
             if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
             if not previous and 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
-            for report in payload['reports']:report['attendees']=payload['attendees']
+            for report in payload['reports']:
+                if not report['attendees_override']:report['attendees']=payload['attendees']
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
             for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
             db.execute('INSERT INTO inspections VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(identity,json.dumps(payload)))
