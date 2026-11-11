@@ -66,7 +66,7 @@ class CloudAutosave(unittest.TestCase):
         self.connect()
         self.fill_title('Save before new')
         self.page.locator('#new').click()
-        expect(self.page.locator('#title')).to_have_value('')
+        expect(self.page.locator('#title')).to_have_value(self.page.locator('#inspection_date').input_value()+' Inspection 2')
         self.assertEqual(self.app.state.store.list()[0]['title'],'Save before new')
 
     def test_manual_save_conflict_pauses_automatic_overwrite(self):
