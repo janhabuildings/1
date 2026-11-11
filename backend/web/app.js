@@ -113,9 +113,9 @@ const attendeeCompanies=['NYC SCA','DSENY Engineering Services PC'];
 function defaultAttendees(client){return [
   {id:crypto.randomUUID(),name:'',company:client||'',title:attendeeRoles[0]},
   {id:crypto.randomUUID(),name:'',company:attendeeCompanies[0],title:attendeeRoles[1]},
-  {id:crypto.randomUUID(),name:'Kamruz Zaman',company:attendeeCompanies[1],title:'PE'}
+  {id:'6c7b7cdc-dc93-4b24-9b47-8b12c94b6a67',name:'Kamruz Zaman',company:attendeeCompanies[1],title:'PE'}
 ];}
-function insertAttendee(person){const last=state.attendees.at(-1);const index=last?.company===attendeeCompanies[1]&&last?.title==='PE'?state.attendees.length-1:state.attendees.length;state.attendees.splice(index,0,person);}
+function insertAttendee(person){const last=state.attendees.at(-1);const anchor=state.attendees.findIndex(row=>row.id==='6c7b7cdc-dc93-4b24-9b47-8b12c94b6a67');const index=anchor>=0?anchor:last?.company===attendeeCompanies[1]&&last?.title==='PE'?state.attendees.length-1:state.attendees.length;state.attendees.splice(index,0,person);}
 function confirmCalendarTitle(title){const selected=state.candidates?.report_subjects?.find(row=>row.title===title);const report=state.reports.find(r=>r.equipment===selected?.equipment);if(!report)return;if(/-\s*(?:No\s+OIs|PE\s+CERT\s+OF\s+USE)\s*$/i.test(title))report.status='No OIs';else if(/-\s*OIs\s*$/i.test(title))report.status='OIs';renderReports();markDirty();}
 function renderAttendees(){
   const picker=$('capture-attendee'),selected=picker.value;picker.replaceChildren(el('option','No attendee / new person'));picker.firstChild.value='';
