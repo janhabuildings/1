@@ -72,6 +72,14 @@ class InspectionInput(BaseModel):
     reports: list[ReportInput] = Field(default_factory=list,max_length=3)
 
 
+def merge_report_attendees(reports, fallback=None):
+    people=[]
+    for report in reports:
+        for person in report['attendees']:
+            if not any(row['id']==person['id'] or all(row[key]==person[key] for key in ('name','company','title')) for row in people):people.append(person)
+    return people or (fallback or [])
+
+
 class AnalyzeInput(BaseModel):
     consent: bool = False
     use_draft_references: bool = True
@@ -210,7 +218,7 @@ def create_app(settings=None):
     @app.post('/inspections',status_code=201,dependencies=[Depends(authorized)])
     def create_inspection(data:InspectionInput):
         payload=json.loads(data.model_dump_json());payload['id']=uid()
-        if 'attendees' not in data.model_fields_set and payload['reports']:payload['attendees']=payload['reports'][0]['attendees']
+        if 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
         for report in payload['reports']:report['attendees']=payload['attendees']
         return store.save(payload)
 
@@ -234,9 +242,10 @@ def create_app(settings=None):
                 for key in ('client','request_date','requested_by','address','subject_project'):
                     if key not in data.model_fields_set:payload[key]=old.get(key,'')
                 if 'attendees' not in data.model_fields_set:
-                    payload['attendees']=payload['reports'][0]['attendees'] if payload['reports'] else old.get('attendees',[])
+                    payload['attendees']=merge_report_attendees(payload['reports'],old.get('attendees',[]))
             if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
+            if not previous and 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
             for report in payload['reports']:report['attendees']=payload['attendees']
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
             for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]

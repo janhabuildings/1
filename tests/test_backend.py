@@ -15,6 +15,20 @@ TOKEN='test-only-token-not-a-real-credential'
 HEADERS={'Authorization':'Bearer '+TOKEN}
 
 class Backend(unittest.TestCase):
+    def test_old_phone_report_attendees_merge_and_explicit_clear_is_respected(self):
+        import uuid
+        first={'id':str(uuid.uuid4()),'name':'First','company':'Client','title':'Competent Person'}
+        second={'id':str(uuid.uuid4()),'name':'Second','company':'NYC SCA','title':'Safety Inspector'}
+        payload={'title':'Legacy phone','inspection_date':'2026-11-10','reports':[{'equipment':'SF','attendees':[first]},{'equipment':'SH','attendees':[second]}]}
+        record=self.client.post('/inspections',headers=HEADERS,json=payload).json()
+        self.assertEqual(record['attendees'],[first,second])
+        saved=self.client.put('/inspections/'+record['id'],headers=HEADERS,json=payload).json()
+        for report in saved['reports']:self.assertEqual(report['attendees'],[first,second])
+        payload['attendees']=[]
+        saved=self.client.put('/inspections/'+record['id'],headers=HEADERS,json=payload).json()
+        self.assertEqual(saved['attendees'],[])
+        self.assertTrue(all(not report['attendees'] for report in saved['reports']))
+
     def test_video_roundtrip_and_shared_attendees(self):
         person={'id':'fixture-person','name':'Person','company':'NYC SCA','title':'Safety Inspector'}
         response=self.client.post('/inspections',headers=HEADERS,json={'title':'Video visit','inspection_date':'2026-11-10',

@@ -58,6 +58,15 @@ import Foundation
         attendeeInspection.sharedAttendees = []
         attendeeInspection.prepareAttendees()
         precondition(attendeeInspection.sharedAttendees.isEmpty) // explicit removal survives reopening
+        var legacy = Inspection()
+        let firstPerson = Attendee(name: "First report person", company: "Client", title: "Competent Person")
+        let secondPerson = Attendee(name: "Second report person", company: "NYC SCA", title: "Safety Inspector")
+        legacy.attendees = [firstPerson]
+        var firstReport = ReportDraft(equipment: "SF"); firstReport.attendees = [firstPerson]
+        var secondReport = ReportDraft(equipment: "SH"); secondReport.attendees = [secondPerson]
+        legacy.reports = [firstReport, secondReport]; legacy.prepareAttendees()
+        precondition(legacy.sharedAttendees.count == 2)
+        precondition(legacy.reports.allSatisfy { $0.attendees == legacy.sharedAttendees })
         var selected = Inspection()
         candidates.apply(to: &selected)
         precondition(selected.reports[0].status.isEmpty)

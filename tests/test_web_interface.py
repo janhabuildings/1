@@ -121,6 +121,26 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(saved['reports'][0]['attendees'],saved['attendees'])
         self.assertEqual(self.errors,[])
 
+    def test_legacy_report_attendees_merge_without_losing_people(self):
+        from playwright.sync_api import expect
+        import uuid
+        first={'id':str(uuid.uuid4()),'name':'First report person','company':'Client','title':'Competent Person'}
+        second={'id':str(uuid.uuid4()),'name':'Second report person','company':'NYC SCA','title':'Safety Inspector'}
+        identity=str(uuid.uuid4())
+        self.app.state.store.save({'id':identity,'title':'Legacy inspection','inspection_date':'2026-11-10',
+            'attendees':[first], 'reports':[{'equipment':'SF','attendees':[first]},{'equipment':'SH','attendees':[second]}]})
+        self.connect()
+        self.page.locator('#saved').select_option(identity)
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
+        names=self.page.get_by_placeholder('Name',exact=True)
+        expect(names).to_have_count(2)
+        expect(names.nth(1)).to_have_value('Second report person')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        record=self.app.state.store.get(identity)
+        self.assertEqual(len(record['attendees']),2)
+        for report in record['reports']:self.assertEqual(report['attendees'],record['attendees'])
+
     def add_separate_report(self,equipment):
         control=self.page.locator('#separate-reports')
         if control.get_attribute('open') is None:control.locator('summary').click()

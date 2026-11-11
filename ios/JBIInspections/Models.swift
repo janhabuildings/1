@@ -60,8 +60,7 @@ struct Inspection: Codable, Equatable, Identifiable {
 
     var sharedAttendees: [Attendee] {
         get {
-            if let attendees { return attendees }
-            return reports.flatMap(\.attendees).reduce(into: []) { result, person in
+            return reports.flatMap(\.attendees).reduce(into: attendees ?? []) { result, person in
                 if !result.contains(where: { $0.id == person.id || ($0.name == person.name && $0.company == person.company && $0.title == person.title) }) { result.append(person) }
             }
         }
@@ -80,6 +79,9 @@ struct Inspection: Codable, Equatable, Identifiable {
         if let first = people.first, first.title == "Competent Person/Site Supervisor",
            first.company.isEmpty || (previousClient != nil && first.company == previousClient), let client, !client.isEmpty {
             people[0].company = client
+        }
+        if let index = people.firstIndex(where: { $0.id == Attendee.defaultEngineerID || ($0.name == "Kamruz Zaman" && $0.company == "DSENY Engineering Services PC" && $0.title == "PE") }) {
+            let engineer = people.remove(at: index); people.append(engineer)
         }
         sharedAttendees = people
     }
