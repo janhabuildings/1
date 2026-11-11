@@ -15,6 +15,25 @@ TOKEN='test-only-token-not-a-real-credential'
 HEADERS={'Authorization':'Bearer '+TOKEN}
 
 class Backend(unittest.TestCase):
+    def test_video_roundtrip_and_shared_attendees(self):
+        person={'id':'fixture-person','name':'Person','company':'NYC SCA','title':'Safety Inspector'}
+        response=self.client.post('/inspections',headers=HEADERS,json={'title':'Video visit','inspection_date':'2026-11-10',
+            'attendees':[person], 'reports':[{'equipment':'SF'},{'equipment':'SH'}]})
+        self.assertEqual(response.status_code,201)
+        record=response.json()
+        for report in record['reports']:self.assertEqual(report['attendees'],[person])
+        video=b'\x00\x00\x00\x14ftypqt  '+b'fixture-video'
+        response=self.client.post('/inspections/'+record['id']+'/media?kind=video&filename=capture.mov',
+            headers=dict(HEADERS,**{'Content-Type':'video/quicktime'}),content=video)
+        self.assertEqual(response.status_code,201,response.text)
+        identity=response.json()['id']
+        self.client.put('/media/'+identity,headers=HEADERS,json={'note':'Location: North\nCondition: loose plank','equipment':'SF'})
+        self.assertEqual(self.client.get('/media/'+identity,headers=HEADERS).content,video)
+        media=self.client.get('/inspections/'+record['id']+'/media',headers=HEADERS).json()[0]
+        self.assertEqual(media['kind'],'video');self.assertIn('North',media['note'])
+        self.assertEqual(self.client.post('/inspections/'+record['id']+'/media?kind=photo',headers=dict(HEADERS,**{'Content-Type':'video/quicktime'}),content=video).status_code,415)
+        self.assertEqual(self.client.post('/inspections/'+record['id']+'/media?kind=video',headers=dict(HEADERS,**{'Content-Type':'video/quicktime'}),content=b'invalid movie').status_code,415)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.app=create_app(Settings(Path(self.temp.name),TOKEN,office_bin=str(ROOT/'.tools/bin/libreoffice')))
