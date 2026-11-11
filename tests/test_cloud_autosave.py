@@ -16,10 +16,11 @@ class CloudAutosave(unittest.TestCase):
         try:workflow.WebWorkflow.tearDown(self)
         finally:self.cloud_patch.stop()
     connect=workflow.WebWorkflow.connect
+    fill_title=workflow.WebWorkflow.fill_title
 
     def test_automatic_save_reopen_and_attendees_before_report(self):
         self.connect()
-        self.page.locator('#title').fill('Cloud draft')
+        self.fill_title('Cloud draft')
         self.page.locator('#add-attendee').click()
         self.page.get_by_placeholder('Name',exact=True).fill('Inspector saved before report')
         expect(self.page.locator('#save-state')).to_contain_text('Saved ·')
@@ -43,9 +44,9 @@ class CloudAutosave(unittest.TestCase):
             return response;
           };
         }''')
-        self.page.locator('#title').fill('First edit')
+        self.fill_title('First edit')
         self.page.wait_for_function('() => window.saveStarted')
-        self.page.locator('#title').fill('Newer edit during save')
+        self.fill_title('Newer edit during save')
         expect(self.page.locator('#save-state')).to_contain_text('Saved ·',timeout=15000)
         self.assertEqual(len(self.app.state.store.list()),1)
         self.assertEqual(self.app.state.store.list()[0]['title'],'Newer edit during save')
@@ -53,7 +54,7 @@ class CloudAutosave(unittest.TestCase):
     def test_failed_save_retries_without_clearing_draft(self):
         self.connect()
         self.page.route('**/inspections/*',lambda route:route.abort(),times=1)
-        self.page.locator('#title').fill('Retried draft')
+        self.fill_title('Retried draft')
         expect(self.page.locator('#save-state')).to_contain_text('Not saved')
         expect(self.page.locator('#title')).to_have_value('Retried draft')
         self.page.evaluate("window.dispatchEvent(new Event('online'))")
@@ -62,15 +63,15 @@ class CloudAutosave(unittest.TestCase):
 
     def test_new_inspection_flushes_pending_edit(self):
         self.connect()
-        self.page.locator('#title').fill('Save before new')
+        self.fill_title('Save before new')
         self.page.locator('#new').click()
         expect(self.page.locator('#title')).to_have_value('')
         self.assertEqual(self.app.state.store.list()[0]['title'],'Save before new')
 
     def test_manual_save_conflict_pauses_automatic_overwrite(self):
-        self.connect();self.page.locator('#title').fill('Previously saved')
+        self.connect();self.fill_title('Previously saved')
         expect(self.page.locator('#save-state')).to_contain_text('Saved ·')
-        self.page.locator('#title').fill('Conflicting local draft')
+        self.fill_title('Conflicting local draft')
         self.gateway.revision+=1
         self.page.locator('#save').click()
         expect(self.page.locator('#status')).to_contain_text('Refresh saved')
