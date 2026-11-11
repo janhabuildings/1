@@ -58,6 +58,7 @@ class ReportInput(BaseModel):
 
 
 class InspectionInput(BaseModel):
+    attendees_initialized: bool = False
     attendees: list[AttendeeInput] = Field(default_factory=list,max_length=50)
     title: str = Field(min_length=1,max_length=200)
     project: str = Field(default='',max_length=200)
@@ -242,6 +243,7 @@ def create_app(settings=None):
             previous=db.execute('SELECT payload FROM inspections WHERE id=?',(identity,)).fetchone()
             if previous:
                 old=json.loads(previous['payload'])
+                if 'attendees_initialized' not in data.model_fields_set:payload['attendees_initialized']=old.get('attendees_initialized',False)
                 old_reports={report['equipment']:report for report in old.get('reports',[])}
                 for incoming,report in zip(data.reports,payload['reports']):
                     if 'attendees_override' not in incoming.model_fields_set and old_reports.get(report['equipment'],{}).get('attendees_override'):
