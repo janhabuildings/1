@@ -718,6 +718,7 @@ class WebWorkflow(unittest.TestCase):
         saved=self.app.state.store.list()[0]
         self.assertEqual(saved['reports'][0]['site']['report_type'],'SStab')
         self.page.reload();self.connect();self.page.locator('#saved').select_option(saved['id'])
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
         expect(self.page.get_by_placeholder('Name',exact=True)).to_have_value('Example Engineer')
         expect(self.page.locator('.choice-cell').filter(has_text='DSENY Engineering Services PC')).to_be_visible()
         self.assertEqual(self.errors,[])
