@@ -67,6 +67,16 @@ import Foundation
         legacy.reports = [firstReport, secondReport]; legacy.prepareAttendees()
         precondition(legacy.sharedAttendees.count == 2)
         precondition(legacy.reports.allSatisfy { $0.attendees == legacy.sharedAttendees })
+        var legacyEmpty = Inspection()
+        legacyEmpty.attendees = []
+        legacyEmpty.client = "Existing calendar client"
+        legacyEmpty.prepareAttendees()
+        precondition(legacyEmpty.sharedAttendees.count == 3)
+        precondition(legacyEmpty.sharedAttendees[0].company == "Existing calendar client")
+        legacyEmpty.sharedAttendees = []
+        legacyEmpty = try JSONDecoder().decode(Inspection.self, from: JSONEncoder().encode(legacyEmpty))
+        legacyEmpty.prepareAttendees()
+        precondition(legacyEmpty.sharedAttendees.isEmpty)
         var overrides = Inspection()
         overrides.prepareAttendees()
         overrides.reports = [ReportDraft(equipment: "SF"), ReportDraft(equipment: "SH")]

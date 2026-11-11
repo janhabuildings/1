@@ -15,6 +15,14 @@ TOKEN='test-only-token-not-a-real-credential'
 HEADERS={'Authorization':'Bearer '+TOKEN}
 
 class Backend(unittest.TestCase):
+    def test_older_phone_save_preserves_attendee_initialization_marker(self):
+        record=self.client.post('/inspections',headers=HEADERS,json={'title':'Cleared attendees',
+            'inspection_date':'2026-11-10','attendees':[],'attendees_initialized':True}).json()
+        saved=self.client.put('/inspections/'+record['id'],headers=HEADERS,json={'title':'Older phone edit',
+            'inspection_date':'2026-11-10','attendees':[]}).json()
+        self.assertTrue(saved['attendees_initialized'])
+        self.assertEqual(saved['attendees'],[])
+
     def test_report_attendee_override_persists_and_can_reset(self):
         shared={'id':'main-person','name':'Main','company':'Client','title':'Competent Person'}
         local={'id':'report-person','name':'Report only','company':'Client','title':'Safety Inspector'}

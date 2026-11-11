@@ -58,6 +58,7 @@ struct Inspection: Codable, Equatable, Identifiable {
     var subject_project: String?
     var calendar_candidates: CalendarCandidates?
     var attendees: [Attendee]?
+    var attendees_initialized: Bool?
 
     var sharedAttendees: [Attendee] {
         get {
@@ -66,13 +67,14 @@ struct Inspection: Codable, Equatable, Identifiable {
             }
         }
         set {
+            attendees_initialized = true
             attendees = newValue
             for index in reports.indices where reports[index].attendees_override != true { reports[index].attendees = newValue }
         }
     }
     mutating func prepareAttendees(previousClient: String? = nil) {
         var people = sharedAttendees
-        if attendees == nil && people.isEmpty {
+        if attendees_initialized != true && people.isEmpty {
             people = [Attendee(company: client ?? "", title: "Competent Person/Site Supervisor"),
                       Attendee(company: "NYC SCA", title: "Safety Inspector"),
                       Attendee(id: Attendee.defaultEngineerID, name: "Kamruz Zaman", company: "DSENY Engineering Services PC", title: "PE")]

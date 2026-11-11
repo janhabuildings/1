@@ -141,6 +141,30 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(len(record['attendees']),2)
         for report in record['reports']:self.assertEqual(report['attendees'],record['attendees'])
 
+    def test_default_attendees_restore_for_old_empty_inspection_but_not_explicit_clear(self):
+        from playwright.sync_api import expect
+        import uuid
+        identity=str(uuid.uuid4())
+        self.app.state.store.save({'id':identity,'title':'Old empty inspection','inspection_date':'2026-11-10',
+            'client':'Existing calendar client','attendees':[],'reports':[]})
+        self.connect()
+        self.page.locator('#saved').select_option(identity)
+        rows=self.page.locator('#attendees .attendee-row')
+        expect(rows).to_have_count(3)
+        expect(rows.first).to_contain_text('Existing calendar client')
+        expect(rows.nth(1)).to_contain_text('Safety Inspector')
+        expect(rows.last.get_by_placeholder('Name',exact=True)).to_have_value('Kamruz Zaman')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        self.assertTrue(self.app.state.store.get(identity)['attendees_initialized'])
+        for _ in range(3):self.page.locator('#attendees').get_by_role('button',name='Remove attendee',exact=True).first.click()
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        self.page.reload();self.connect()
+        self.page.locator('#saved').select_option(identity)
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
+        expect(rows).to_have_count(0)
+
     def test_collapsed_report_attendees_override_and_reset(self):
         from playwright.sync_api import expect
         self.connect(preserve_defaults=True)
