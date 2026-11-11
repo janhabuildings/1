@@ -47,12 +47,15 @@ class WebWorkflow(unittest.TestCase):
         if not preserve_defaults:self.page.evaluate('state.attendees=[];renderAttendees()')
     def fill_title(self,text):
         current=self.page.locator('.tab.active').get_attribute('data-tab')
-        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('[data-tab=inspection]').click()
         self.page.locator('#title').fill(text)
         self.page.locator('[data-tab='+current+']').click()
+    def calendar_select(self):
+        equipment=self.page.evaluate('state.activeReport')
+        return self.page.locator('[data-calendar-title='+equipment+']')
     def choose_calendar_title(self,title):
         self.page.locator('[data-tab=reports]').click()
-        self.page.locator('#calendar-title').select_option(title)
+        self.calendar_select().select_option(title)
     def fill_calendar(self,text):
         control=self.page.locator('#calendar-content')
         if control.get_attribute('open') is None:control.locator('summary').click()
@@ -105,8 +108,8 @@ class WebWorkflow(unittest.TestCase):
         expect(rows).to_have_count(4)
         expect(rows.last.get_by_placeholder('Name',exact=True)).to_have_value('Kamruz Zaman')
         self.page.locator('[data-tab=reports]').click()
-        expect(self.page.locator('#title')).to_be_visible()
-        self.page.locator('#calendar-title').select_option(index=2)
+        expect(self.page.locator('#title')).to_be_hidden()
+        self.calendar_select().select_option(index=2)
         expect(self.page.get_by_label('Outcome for custom title',exact=True)).to_have_value('No OIs')
         self.page.locator('[data-tab=evidence]').click()
         self.page.locator('#capture-name').fill('Photo contact')
@@ -164,6 +167,69 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#saved').select_option(identity)
         expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
         expect(rows).to_have_count(0)
+
+    def test_report_subjects_outcomes_stamps_are_independent_and_title_tracks_equipment(self):
+        from playwright.sync_api import expect
+        self.connect(preserve_defaults=True)
+        self.assertRegex(self.page.locator('#title').input_value(),r'^\d{4}-\d{2}-\d{2} Inspection \d+$')
+        prefix='2026-11-10 Project '
+        sh_clear=prefix+'Sidewalk Shed-I-Inspection- PE CERT OF USE'
+        sf_oi=prefix+'Supported Scaffold-II-Inspection-OIs'
+        sf_clear=prefix+'Supported Scaffold-II-Inspection-No OIs'
+        self.fill_calendar('\n'.join([sh_clear,sf_oi,sf_clear,'Client: Client','Project: Project','Inspected on: 11/10/2026']))
+        self.page.locator('#extract').click()
+        expect(self.page.locator('#title')).to_have_value('2026-11-10 Client-Project-SH SF')
+        self.page.locator('[data-tab=reports]').click()
+        expect(self.page.locator('#title')).to_be_hidden()
+        self.page.locator('#add-SH').click()
+        sh=self.page.locator('#report-SH')
+        sh.get_by_label('Inspection title from calendar',exact=True).select_option(sh_clear)
+        expect(sh.get_by_role('button',name='+ Add open item',exact=True)).to_be_hidden()
+        sh.get_by_label('Apply saved signature/stamp to this report',exact=True).check()
+        self.page.locator('#add-SF').click()
+        sf=self.page.locator('#report-SF')
+        sf.get_by_label('Inspection title from calendar',exact=True).select_option(sf_clear)
+        sf.get_by_label('Apply saved signature/stamp to this report',exact=True).check()
+        sf.get_by_label('Inspection title from calendar',exact=True).select_option(sf_oi)
+        expect(sf.get_by_role('button',name='+ Add open item',exact=True)).to_be_visible()
+        expect(sf.get_by_label('Apply saved signature/stamp to this report',exact=True)).to_have_count(0)
+        self.assertTrue(self.page.evaluate("state.reports.find(r=>r.equipment==='SH').stamp_requested"))
+        self.assertFalse(self.page.evaluate("state.reports.find(r=>r.equipment==='SF').stamp_requested"))
+        expect(sh.get_by_label('Inspection title from calendar',exact=True)).to_have_value(sh_clear)
+        expect(self.page.locator('#title')).to_have_value('2026-11-10 Client-Project-SH SF')
+        self.add_separate_report('OT')
+        self.page.get_by_label('Other inspection type',exact=True).select_option('SOE')
+        expect(self.page.locator('#title')).to_have_value('2026-11-10 Client-Project-SH SF SOE')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        record=self.app.state.store.list()[0]
+        self.page.reload();self.connect(preserve_defaults=True)
+        self.page.locator('#saved').select_option(record['id'])
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
+        self.page.locator('[data-tab=reports]').click();self.page.locator('#add-SF').click()
+        expect(sf.get_by_label('Inspection title from calendar',exact=True)).to_have_value(sf_oi)
+        expect(sh.get_by_label('Inspection title from calendar',exact=True)).to_have_value(sh_clear)
+        expect(self.page.locator('#title')).to_have_value('2026-11-10 Client-Project-SH SF SOE')
+        self.assertEqual(self.errors,[])
+
+    def test_temporary_inspection_title_updates_on_calendar_extraction_and_additional_report(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.fill_title('Remember the north entrance')
+        self.page.locator('#notes').fill('Field notes')
+        expect(self.page.locator('#title')).to_have_value('Remember the north entrance')
+        subject='2026-11-10 Project Sidewalk Shed-I-Inspection-No OIs'
+        self.fill_calendar(subject+'\nClient: Client\nProject: Project\nInspected on: 11/10/2026')
+        self.page.locator('#extract').click()
+        expect(self.page.locator('#title')).to_have_value('2026-11-10 Client-Project-SH')
+        self.fill_title('Temporary description after extraction')
+        self.choose_calendar_title(subject)
+        expect(self.page.locator('#title')).to_have_value('Temporary description after extraction')
+        self.add_separate_report('SF')
+        expect(self.page.locator('#title')).to_have_value('2026-11-10 Client-Project-SH SF')
+        expect(self.page.locator('#report-SH').get_by_label('Inspection title from calendar',exact=True)).to_have_value(subject)
+        self.assertEqual(self.page.locator('.report-card').count(),2)
+        self.assertEqual(self.errors,[])
 
     def test_collapsed_report_attendees_override_and_reset(self):
         from playwright.sync_api import expect
@@ -408,6 +474,7 @@ class WebWorkflow(unittest.TestCase):
         self.connect()
         self.page.locator('[data-tab=reports]').click()
         self.page.locator('#add-SH').click()
+        self.page.get_by_label('Outcome for custom title',exact=True).select_option('OIs')
         self.page.get_by_role('button',name='+ Add open item',exact=True).click()
         actions=extract_actions()['SH']
         first=next(a for a in actions if ';' in a)
@@ -479,13 +546,13 @@ class WebWorkflow(unittest.TestCase):
         self.fill_calendar(first+'\n'+second)
         self.page.locator('#extract').click()
         self.page.locator('[data-tab=reports]').click()
-        expect(self.page.locator('#calendar-title-options')).to_be_visible()
-        self.assertEqual(self.page.locator('#calendar-title').input_value(), '')
-        self.assertEqual(self.page.locator('#title').input_value(), '')
+        expect(self.calendar_select()).to_be_visible()
+        self.assertEqual(self.calendar_select().input_value(), '')
+        self.assertEqual(self.page.locator('#title').input_value(), '2026-05-11 PS87Q-SF')
         original_date=self.page.locator('#inspection_date').input_value()
         self.choose_calendar_title(second)
-        self.page.locator('#use-calendar-title').click()
-        self.assertEqual(self.page.locator('#title').input_value(), second)
+        self.page.locator('.report-card:visible').get_by_role('button',name='Use selected title and outcome',exact=True).click()
+        self.assertEqual(self.page.locator('#title').input_value(), '2026-05-11 PS87Q-SF')
         self.assertEqual(self.page.locator('#inspection_date').input_value(), original_date)
         self.page.locator('[data-tab=inspection]').click()
         self.page.locator('#apply-calendar').click()
@@ -493,8 +560,8 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.get_by_label('Outcome for custom title',exact=True).input_value(), 'No OIs')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
-        self.assertEqual(self.app.state.store.list()[0]['title'], second)
-        expect(self.page.locator('#saved option').last).to_contain_text(second)
+        self.assertEqual(self.app.state.store.list()[0]['title'], '2026-05-11 PS87Q-SF')
+        expect(self.page.locator('#saved option').last).to_contain_text('PS87Q-SF')
         self.assertEqual(self.errors, [])
 
     def test_extraction_populates_fields_without_apply_and_survives_save_reload(self):
@@ -509,7 +576,7 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#project')).to_have_value('PS87Q')
         expect(self.page.locator('#request_date')).to_have_value('2026-05-06')
         expect(self.page.locator('#extract')).to_be_enabled()
-        self.assertEqual(self.page.locator('#title').input_value(),title)
+        self.assertEqual(self.page.locator('#title').input_value(),'2026-05-11 Inspector confirmed client-PS87Q-SF')
         self.assertEqual(self.page.locator('#requested_by').input_value(),'Example Contact Example Company')
         self.assertEqual(self.page.locator('#address').input_value(),'67-54 80 Street Qns NY')
         self.assertEqual(self.page.locator('#client').input_value(),'Inspector confirmed client')
@@ -523,7 +590,7 @@ class WebWorkflow(unittest.TestCase):
         self.connect()
         self.page.locator('#saved').select_option(saved['id'])
         expect(self.page.locator('#requested_by')).to_have_value('Example Contact Example Company')
-        self.assertEqual(self.page.locator('#title').input_value(),title)
+        self.assertEqual(self.page.locator('#title').input_value(),'2026-05-11 Inspector confirmed client-PS87Q-SF')
         self.assertEqual(self.page.locator('#inspection_date').input_value(),'2026-05-11')
         self.assertEqual(self.errors, [])
 
@@ -592,7 +659,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#extract').click()
         expect(self.page.locator('#project')).to_have_value('G Washington HS')
         expect(self.page.locator('#extract')).to_be_enabled()
-        self.assertEqual(self.page.locator('#calendar-title option').count(),5)
+        self.assertEqual(self.calendar_select().locator('option').count(),5)
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.locator('#report-OT')).to_be_visible()
         self.assertEqual(self.page.locator('#report-SH').count(),0)
@@ -600,7 +667,7 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.get_by_label('Inspection number · VII / VIII',exact=True).input_value(),'')
         self.assertEqual(self.page.get_by_label('Outcome for custom title',exact=True).input_value(),'')
         self.page.locator('[data-tab=inspection]').click()
-        titles=self.page.locator('#calendar-title option').all_text_contents()[1:]
+        titles=self.calendar_select().locator('option').all_text_contents()[1:]
         self.choose_calendar_title(titles[0])
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.get_by_label('Inspection number · VII / VIII',exact=True)).to_have_value('V')
@@ -616,7 +683,6 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('[data-tab=inspection]').click()
         self.choose_calendar_title(titles[0])
         self.page.locator('[data-tab=inspection]').click()
-        expect(self.page.locator('#calendar-report-notice')).to_contain_text('Existing entries were kept')
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.get_by_label('Inspection number · VII / VIII',exact=True)).to_have_value('IX')
         self.page.locator('[data-tab=inspection]').click()
@@ -690,6 +756,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#add-SF').click()
         self.page.get_by_label('Outcome for custom title',exact=True).select_option('OIs')
         self.page.get_by_label('Permit number',exact=True).fill('PREVIEW-PERMIT-123')
+        self.page.get_by_label('Outcome for custom title',exact=True).select_option('OIs')
         self.page.get_by_role('button',name='+ Add open item',exact=True).click()
         self.page.get_by_label('Location / occurrence',exact=True).fill('North side')
         self.page.get_by_label('Corrective action',exact=True).fill('Install missing protection')
@@ -794,6 +861,7 @@ class WebWorkflow(unittest.TestCase):
         from playwright.sync_api import expect
         from scripts.build_action_options import extract_actions
         self.connect();self.page.locator('[data-tab=reports]').click();self.page.locator('#add-SH').click()
+        self.page.get_by_label('Outcome for custom title',exact=True).select_option('OIs')
         self.page.get_by_role('button',name='+ Add open item',exact=True).click()
         location=self.page.get_by_label('Location / occurrence',exact=True)
         action=self.page.get_by_label('Corrective action',exact=True)

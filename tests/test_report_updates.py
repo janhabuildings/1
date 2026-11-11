@@ -82,6 +82,32 @@ class CellMapping(unittest.TestCase):
 
 
 class LifecycleAndStamp(unittest.TestCase):
+    def test_stamp_applies_only_to_selected_report_and_stale_files_hide_independently(self):
+        selected=sample_report('SH-No OIs');other=sample_report('SF-No OIs')
+        selected['stamp_requested']=True
+        other['attendees_override']=True
+        other['attendees']=[{'name':'Other engineer','company':'Other company','title':'PE'}]
+        owner=selected['attendees'][0]['name']
+        response=self.client.post('/inspections',headers=HEADERS,json={'title':'Independent reports',
+            'inspection_date':selected['inspection_date'],'reports':[selected,other]})
+        record=response.json()
+        asset=self.client.post('/signing-assets',params={'owner':owner},headers=HEADERS,content=test_image()).json()['id']
+        result=self.client.post('/inspections/'+record['id']+'/reports',headers=HEADERS,
+            json={'stamp_id':asset,'stamp_reviewed':True,'stamp_equipment':['SH']})
+        self.assertEqual(result.status_code,200,result.text)
+        reports={report['equipment']:report for report in result.json()['reports']}
+        self.assertIn('visual_stamp',reports['SH']);self.assertNotIn('visual_stamp',reports['SF'])
+        for equipment,expected in [('SH',True),('SF',False)]:
+            artifact=next(a for a in result.json()['artifacts'] if a['equipment']==equipment and a['filename'].endswith('.docx'))
+            document=Document(BytesIO(self.client.get('/artifacts/'+artifact['id'],headers=HEADERS).content))
+            self.assertEqual(bool(document._element.xpath('.//w:drawing')),expected)
+        record['reports'][0]['status']='OIs'
+        record['reports'][0]['open_items']=[{'location':'North','action':'Secure connection'}]
+        self.client.put('/inspections/'+record['id'],headers=HEADERS,json=record)
+        saved=self.client.get('/inspections/'+record['id']+'/artifacts',headers=HEADERS).json()
+        self.assertTrue(saved['artifacts'])
+        self.assertEqual({item['equipment'] for item in saved['artifacts']},{'SF'})
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.app=create_app(Settings(Path(self.temp.name),'updates-test-token',office_bin=str(ROOT/'.tools/bin/libreoffice')))
         self.client=TestClient(self.app)

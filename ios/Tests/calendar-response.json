@@ -59,6 +59,10 @@
       "report_type": "Unknown / custom"
     }
   ],
+  "equipment_labels": [
+    "Main Building Interior Shoring",
+    "Field House Interior Shoring"
+  ],
   "confirmed": false,
   "notice": "Calendar template alternatives are not inspection results. Confirm all candidates."
 }

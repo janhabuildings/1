@@ -14,15 +14,15 @@ import Foundation
         precondition(inspection.reports[0].status.isEmpty && inspection.reports[0].attendees.count == 3)
         precondition(inspection.reports[0].drawings_approved.isEmpty)
         let titles = candidates.titles!
-        candidates.apply(to: &inspection, selectedTitle: titles[0])
+        inspection.confirmCalendarTitle(titles[0], candidates: candidates)
         precondition(inspection.reports[0].inspection_code == "V")
         precondition(inspection.reports[0].site["other_name"] == "Main Building Interior Shoring")
-        candidates.apply(to: &inspection, selectedTitle: titles[2], previousTitle: titles[0])
+        inspection.confirmCalendarTitle(titles[2], candidates: candidates)
         precondition(inspection.reports[0].inspection_code == "VI")
         precondition(inspection.reports[0].site["other_name"] == "Field House Interior Shoring")
         inspection.reports[0].inspection_code = "MANUAL"
         inspection.reports[0].address = "Reviewed address"
-        candidates.apply(to: &inspection, selectedTitle: titles[0], previousTitle: titles[2])
+        inspection.confirmCalendarTitle(titles[0], candidates: candidates)
         precondition(inspection.reports[0].inspection_code == "MANUAL")
         precondition(inspection.reports[0].address == "Reviewed address")
         let reopened = try JSONDecoder().decode(Inspection.self, from: JSONEncoder().encode(inspection))
@@ -103,6 +103,34 @@ import Foundation
         precondition(selected.reports[0].status == "OIs")
         selected.confirmCalendarTitle(titles[1], candidates: candidates)
         precondition(selected.reports[0].status == "No OIs")
+        let date = "2026-11-10"
+        var titleInspection = Inspection.fresh(existing: [], on: date)
+        precondition(titleInspection.title == date + " Inspection 1")
+        precondition(Inspection.fresh(existing: [titleInspection], on: date).title == date + " Inspection 2")
+        let sfOI = date + " Project Supported Scaffold-I-Inspection-OIs"
+        let sfClear = date + " Project Supported Scaffold-I-Inspection- PE CERT OF USE"
+        let shClear = date + " Project Sidewalk Shed-I-Inspection-No OIs"
+        let titleCandidates = CalendarCandidates(fields: ["client":"Client","project":"Project","inspection_date":date], equipment: [["equipment":"SH"],["equipment":"SF"]], titles: [sfOI,sfClear,shClear], report_subjects: [["title":sfOI,"equipment":"SF"],["title":sfClear,"equipment":"SF"],["title":shClear,"equipment":"SH"]], equipment_labels: ["SH","SF"])
+        titleCandidates.apply(to: &titleInspection, applyDates: true)
+        precondition(titleInspection.title == date + " Client-Project-SH SF")
+        titleInspection.confirmCalendarTitle(shClear, candidates: titleCandidates)
+        titleInspection.reports[0].stamp_requested = true
+        titleInspection.confirmCalendarTitle(sfClear, candidates: titleCandidates)
+        titleInspection.reports[1].stamp_requested = true
+        titleInspection.confirmCalendarTitle(sfOI, candidates: titleCandidates)
+        precondition(titleInspection.reports[0].calendar_title == shClear)
+        precondition(titleInspection.reports[0].stamp_requested == true)
+        precondition(titleInspection.reports[1].calendar_title == sfOI && titleInspection.reports[1].stamp_requested == false)
+        precondition(titleInspection.title == date + " Client-Project-SH SF")
+        titleInspection.title = "Temporary field label"
+        titleInspection.confirmCalendarTitle(sfClear, candidates: titleCandidates)
+        precondition(titleInspection.title == "Temporary field label")
+        var extra = ReportDraft(equipment: "OT"); extra.site["report_type"] = "SOE"
+        titleInspection.reports.append(extra); titleInspection.refreshTitle(force: true)
+        precondition(titleInspection.title == date + " Client-Project-SH SF SOE")
+        precondition(Inspection.equipmentCode("Structural Stability") == "SStab")
+        precondition(Inspection.equipmentCode("Fall Protection") == "FP")
+        precondition(Inspection.equipmentCode("Unusual equipment") == "Unusual equipment")
         print("Calendar extraction, selection, manual edits, reopen and legacy-cache regression checks passed.")
     }
 }

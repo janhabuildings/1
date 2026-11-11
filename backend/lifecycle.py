@@ -66,12 +66,26 @@ def delete_media(store,identity):
 
 
 def artifacts(store,identity):
-    store.get(identity)
+    record=store.get(identity)
+    current={report['equipment']:report for report in record.get('reports',[])}
+    versions=record.get('report_versions',{})
     with store.connect() as db:
         rows=list(db.execute('SELECT id,filename,mime,path FROM artifacts WHERE inspection_id=? ORDER BY rowid DESC',(identity,)))
     latest={}
     for row in rows: latest.setdefault(Path(row['path']).parent.name,Path(row['path']).parent.parent.name)
     result=[dict(id=r['id'],filename=r['filename'],mime=r['mime'],equipment=Path(r['path']).parent.name,generation_id=Path(r['path']).parent.parent.name) for r in rows if Path(r['path']).parent.parent.name==latest[Path(r['path']).parent.name]]
+    def matches_current(artifact):
+        eq=artifact['equipment'];report=current.get(eq)
+        if report is None:return True
+        version=versions.get(eq)
+        if version and version['generation_id']==artifact['generation_id']:
+            return (version['status']==report.get('status') and version.get('calendar_title','')==report.get('calendar_title','')
+                    and (not version.get('track_stamp') or bool(version.get('stamp_requested'))==bool(report.get('stamp_requested'))))
+        name=artifact['filename'].casefold()
+        if '-inspection-' not in name:return True
+        if report.get('status') not in ('OIs','No OIs'):return False
+        return ('-inspection-ois' in name if report.get('status')=='OIs' else '-inspection-pe cert of use' in name or '-inspection-no ois' in name)
+    result=[artifact for artifact in result if matches_current(artifact)]
     reports=[]
     for eq in dict.fromkeys(r['equipment'] for r in result):
         complete=any(r['equipment']==eq and r['filename'].endswith('.eml') for r in result)

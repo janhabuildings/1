@@ -222,7 +222,7 @@ def check_address(address):
     return address
 
 
-def generate(request, output, renderer='libreoffice', templates=None, pdf_postprocess=None, docx_postprocess=None):
+def generate(request, output, renderer='libreoffice', templates=None, pdf_postprocess=None, docx_postprocess=None, postprocess_equipment=None):
     if renderer not in ('libreoffice','word'):
         raise ValueError('renderer must be libreoffice or word')
     entries=request.get('reports')
@@ -254,7 +254,8 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
         docx=folder/(safe+' - DRAFT.docx')
         selected=(templates or {}).get(data['equipment']+'-'+data['status'])
         options={} if selected is None else {'template':selected['path'],'template_mode':selected['mode'],'mapping':selected.get('mapping',{})}
-        reports.fill_report(data,docx,draft=True,reserve_signature=bool(pdf_postprocess and data['status']=='No OIs'),**options)
+        use_postprocess = postprocess_equipment is None or data['equipment'] in postprocess_equipment
+        reports.fill_report(data,docx,draft=True,reserve_signature=bool(pdf_postprocess and use_postprocess and data['status']=='No OIs'),**options)
         audit=font_audit(docx)
         entry={'equipment':data['equipment'],'subject':title,'docx':str(docx),'missing_fields':missing,
                'font_audit':audit,'renderer':renderer,'delivery_ready':False,'status':'docx_generated',
@@ -264,7 +265,7 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
         if selected:
             entry['template_version']={key:selected[key] for key in ('id','sha256')}
         if data['status']=='No OIs':
-            entry['review_required'].append('Review the applied visual signature/stamp image and final PDF before delivery' if pdf_postprocess else 'PE must sign/seal the final PDF; conversion is not a signature')
+            entry['review_required'].append('Review the applied visual signature/stamp image and final PDF before delivery' if pdf_postprocess and use_postprocess else 'PE must sign/seal the final PDF; conversion is not a signature')
         try:
             attachments=[]
             if data['status']=='OIs':
@@ -274,7 +275,7 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
                 entry['html_file']=str(html_file)
             else:
                 pdf=office_convert(docx,folder,'pdf',renderer)
-                if pdf_postprocess: entry['visual_stamp']=pdf_postprocess(pdf,data)
+                if pdf_postprocess and use_postprocess: entry['visual_stamp']=pdf_postprocess(pdf,data)
                 entry['pdf']=str(pdf)
                 attachments=[{'path':str(pdf),'filename':pdf.name,'mime_type':'application/pdf',
                               'sha256':hashlib.sha256(pdf.read_bytes()).hexdigest()}]
@@ -308,7 +309,7 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
             entry.update(status='local_draft_generated',eml=str(eml),gmail_handoff=str(handoff_file))
         except (RuntimeError,subprocess.TimeoutExpired,OSError) as error:
             entry.update(status='conversion_blocked',error=str(error))
-        if docx_postprocess and data['status']=='No OIs':
+        if docx_postprocess and use_postprocess and data['status']=='No OIs':
             entry['visual_stamp_docx']=docx_postprocess(docx,data)
         result['reports'].append(entry)
     (output/'manifest.json').write_text(json.dumps(result,indent=2))
