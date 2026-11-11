@@ -28,6 +28,7 @@ class CloudAutosave(unittest.TestCase):
         self.assertEqual(record['attendees'][0]['name'],'Inspector saved before report')
         self.page.reload();self.connect()
         self.page.locator('#saved').select_option(record['id'])
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
         expect(self.page.locator('#title')).to_have_value('Cloud draft')
         expect(self.page.get_by_placeholder('Name',exact=True)).to_have_value('Inspector saved before report')
         self.assertEqual(self.errors,[])
