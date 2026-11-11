@@ -241,7 +241,7 @@ struct InspectionDetail: View {
                     applyCalendar(previousTitle: previous)
                     inspection.confirmCalendarTitle(title, candidates: calendarCandidates ?? inspection.calendar_candidates)
                 }
-            }), calendarTitles: calendarCandidates?.titles ?? inspection.calendar_candidates?.titles ?? [], calendarSubjects: calendarCandidates?.report_subjects ?? inspection.calendar_candidates?.report_subjects ?? [])
+            }), calendarTitles: calendarCandidates?.titles ?? inspection.calendar_candidates?.titles ?? [], calendarSubjects: calendarCandidates?.report_subjects ?? inspection.calendar_candidates?.report_subjects ?? [], attendees: inspection.sharedAttendees, attendeeClient: inspection.client ?? "")
         }
         .onChange(of: inspection) { _, value in store.save(value); scheduleSync() }
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
@@ -398,17 +398,7 @@ struct InspectionDetail: View {
     }
     private var attendeesSection: some View {
         Section("Attendees") {
-            ForEach(attendeeBinding) { $person in
-                VStack(alignment: .leading) {
-                    HStack {
-                        TextField("Name", text: $person.name)
-                        CompactRemoveButton(label: "Remove attendee") { inspection.sharedAttendees.removeAll { $0.id == person.id } }
-                    }
-                    MultiChoiceField(label: "Company / agency", value: $person.company, options: AttendeeOptions.companies + [inspection.client ?? ""].filter { !$0.isEmpty })
-                    MultiChoiceField(label: "Role", value: $person.title, options: AttendeeOptions.roles)
-                }
-            }
-            Button("Add attendee") { inspection.insertAttendee(Attendee()) }
+            AttendeeListFields(attendees: attendeeBinding, client: inspection.client ?? "")
             Text("Review the preset rows and enter the people who attended. This list is used in every report.").font(.caption).foregroundStyle(.secondary)
         }
     }

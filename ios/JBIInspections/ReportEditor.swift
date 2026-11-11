@@ -5,8 +5,33 @@ enum AttendeeOptions {
     static let companies = ["NYC SCA", "DSENY Engineering Services PC"]
 }
 
+struct AttendeeListFields: View {
+    @Binding var attendees: [Attendee]
+    var client: String
+    var body: some View {
+        ForEach($attendees) { $person in
+            VStack(alignment: .leading) {
+                HStack {
+                    TextField("Name", text: $person.name)
+                    CompactRemoveButton(label: "Remove attendee") { attendees.removeAll { $0.id == person.id } }
+                }
+                MultiChoiceField(label: "Company / agency", value: $person.company, options: Array(Set(AttendeeOptions.companies + [client].filter { !$0.isEmpty })).sorted())
+                MultiChoiceField(label: "Role", value: $person.title, options: AttendeeOptions.roles)
+            }
+        }
+        Button("Add attendee") {
+            let anchor = attendees.firstIndex(where: { $0.id == Attendee.defaultEngineerID })
+            let last = attendees.last
+            let index = anchor ?? (last?.company == "DSENY Engineering Services PC" && last?.title == "PE" ? max(0, attendees.count - 1) : attendees.count)
+            attendees.insert(Attendee(), at: index)
+        }
+    }
+}
+
 struct ReportFactsEditor: View {
     @Binding var reports: [ReportDraft]
+    var attendees: [Attendee]
+    var attendeeClient: String
     var project: String
     var inspectionDate: String
     @Binding var inspectionTitle: String
@@ -14,8 +39,8 @@ struct ReportFactsEditor: View {
     var calendarTitles: [String]
     var calendarSubjects: [[String: String]]
     @State private var selectedEquipment: String
-    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String, inspectionTitle: Binding<String>, calendarTitle: Binding<String>, calendarTitles: [String], calendarSubjects: [[String: String]] = []) {
-        _reports = reports; self.project = project; self.inspectionDate = inspectionDate
+    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String, inspectionTitle: Binding<String>, calendarTitle: Binding<String>, calendarTitles: [String], calendarSubjects: [[String: String]] = [], attendees: [Attendee], attendeeClient: String) {
+        _reports = reports; self.attendees = attendees; self.attendeeClient = attendeeClient; self.project = project; self.inspectionDate = inspectionDate
         _inspectionTitle = inspectionTitle; _calendarTitle = calendarTitle; self.calendarTitles = calendarTitles; self.calendarSubjects = calendarSubjects
         _selectedEquipment = State(initialValue: initialEquipment)
     }
@@ -39,7 +64,7 @@ struct ReportFactsEditor: View {
         let titles = calendarSubjects.isEmpty ? calendarTitles : calendarSubjects.filter { $0["equipment"] == equipment }.compactMap { $0["title"] }
         ReportEditor(report: Binding(get: { reports.first(where: { $0.equipment == equipment }) ?? ReportDraft(equipment: equipment) }, set: { value in
             if let index = reports.firstIndex(where: { $0.equipment == equipment }) { reports[index] = value }
-        }), reportSelection: selection, inspectionTitle: $inspectionTitle, calendarTitle: Binding(get: { titles.contains(calendarTitle) ? calendarTitle : "" }, set: { calendarTitle = $0 }), calendarTitles: titles).id(equipment)
+        }), reportSelection: selection, inspectionTitle: $inspectionTitle, calendarTitle: Binding(get: { titles.contains(calendarTitle) ? calendarTitle : "" }, set: { calendarTitle = $0 }), calendarTitles: titles, inspectionAttendees: attendees, attendeeClient: attendeeClient).id(equipment)
     }
 }
 
@@ -172,6 +197,10 @@ struct ReportEditor: View {
     @Binding var inspectionTitle: String
     @Binding var calendarTitle: String
     var calendarTitles: [String]
+    var inspectionAttendees: [Attendee]
+    var attendeeClient: String
+    @State private var attendeesExpanded = false
+    @State private var attendeeNotice = ""
     private var siteFields: [(String, String)] {
         report.equipment == "OT" ? [] : report.equipment == "SH" ? [("length_ft", "Approx. length (ft)"), ("sections", "Individual sections"),
             ("height_ft", "Max height (ft)"), ("width_ft", "Max width (ft)")] :
@@ -240,6 +269,17 @@ struct ReportEditor: View {
                 TextField("Inspection number · e.g. VII", text: $report.inspection_code)
                 TextField("Address", text: $report.address, axis: .vertical)
                 TextField("Actually inspected locations / extents", text: $report.locations, axis: .vertical)
+            }
+            Section {
+                DisclosureGroup("Attendees (\(report.attendees.count))", isExpanded: $attendeesExpanded) {
+                    Text(report.attendees_override == true ? "Edited for this report only. Reset to use the current inspection list." : "Filled from the inspection. Editing creates a list for this report only.").font(.caption).foregroundStyle(.secondary)
+                    AttendeeListFields(attendees: Binding(get: { report.attendees }, set: { value in report.attendees = value; report.attendees_override = true }), client: attendeeClient)
+                    Button("Reset to inspection attendees") {
+                        report.attendees = inspectionAttendees; report.attendees_override = false
+                        attendeeNotice = "Attendees reset to the inspection list."
+                    }
+                    if !attendeeNotice.isEmpty { Text(attendeeNotice).font(.caption).foregroundStyle(.secondary) }
+                }
             }
             Section("Drawing status") {
                 drawingPicker("PE drawings on site", selection: $report.drawings_on_site)

@@ -67,6 +67,25 @@ import Foundation
         legacy.reports = [firstReport, secondReport]; legacy.prepareAttendees()
         precondition(legacy.sharedAttendees.count == 2)
         precondition(legacy.reports.allSatisfy { $0.attendees == legacy.sharedAttendees })
+        var overrides = Inspection()
+        overrides.prepareAttendees()
+        overrides.reports = [ReportDraft(equipment: "SF"), ReportDraft(equipment: "SH")]
+        overrides.prepareAttendees()
+        let mainName = overrides.sharedAttendees[0].name
+        overrides.reports[0].attendees[0].name = "Report only"
+        overrides.reports[0].attendees_override = true
+        precondition(overrides.sharedAttendees[0].name == mainName)
+        var updated = overrides.sharedAttendees; updated[0].name = "Main changed"
+        overrides.sharedAttendees = updated
+        overrides.prepareAttendees()
+        precondition(overrides.reports[0].attendees[0].name == "Report only")
+        precondition(overrides.reports[1].attendees[0].name == "Main changed")
+        overrides = try JSONDecoder().decode(Inspection.self, from: JSONEncoder().encode(overrides))
+        precondition(overrides.reports[0].attendees_override == true)
+        overrides.reports[0].attendees = overrides.sharedAttendees
+        overrides.reports[0].attendees_override = false
+        overrides.prepareAttendees()
+        precondition(overrides.reports[0].attendees == overrides.sharedAttendees)
         var selected = Inspection()
         candidates.apply(to: &selected)
         precondition(selected.reports[0].status.isEmpty)

@@ -15,6 +15,26 @@ TOKEN='test-only-token-not-a-real-credential'
 HEADERS={'Authorization':'Bearer '+TOKEN}
 
 class Backend(unittest.TestCase):
+    def test_report_attendee_override_persists_and_can_reset(self):
+        shared={'id':'main-person','name':'Main','company':'Client','title':'Competent Person'}
+        local={'id':'report-person','name':'Report only','company':'Client','title':'Safety Inspector'}
+        payload={'title':'Override visit','inspection_date':'2026-11-10','attendees':[shared],
+            'reports':[{'equipment':'SF','attendees':[local],'attendees_override':True},{'equipment':'SH'}]}
+        record=self.client.post('/inspections',headers=HEADERS,json=payload).json()
+        self.assertEqual(record['attendees'],[shared]);self.assertEqual(record['reports'][0]['attendees'],[local])
+        self.assertEqual(record['reports'][1]['attendees'],[shared])
+        payload['attendees'][0]['name']='Updated main'
+        saved=self.client.put('/inspections/'+record['id'],headers=HEADERS,json=payload).json()
+        self.assertEqual(saved['reports'][0]['attendees'],[local])
+        self.assertEqual(saved['reports'][1]['attendees'][0]['name'],'Updated main')
+        # A previous app build omits the flag; it must not silently clear it.
+        payload['reports'][0].pop('attendees_override')
+        saved=self.client.put('/inspections/'+record['id'],headers=HEADERS,json=payload).json()
+        self.assertTrue(saved['reports'][0]['attendees_override'])
+        payload['reports'][0]['attendees_override']=False
+        saved=self.client.put('/inspections/'+record['id'],headers=HEADERS,json=payload).json()
+        self.assertEqual(saved['reports'][0]['attendees'],saved['attendees'])
+
     def test_old_phone_report_attendees_merge_and_explicit_clear_is_respected(self):
         import uuid
         first={'id':str(uuid.uuid4()),'name':'First','company':'Client','title':'Competent Person'}
