@@ -12,10 +12,11 @@ struct ReportFactsEditor: View {
     @Binding var inspectionTitle: String
     @Binding var calendarTitle: String
     var calendarTitles: [String]
+    var calendarSubjects: [[String: String]]
     @State private var selectedEquipment: String
-    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String, inspectionTitle: Binding<String>, calendarTitle: Binding<String>, calendarTitles: [String]) {
+    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String, inspectionTitle: Binding<String>, calendarTitle: Binding<String>, calendarTitles: [String], calendarSubjects: [[String: String]] = []) {
         _reports = reports; self.project = project; self.inspectionDate = inspectionDate
-        _inspectionTitle = inspectionTitle; _calendarTitle = calendarTitle; self.calendarTitles = calendarTitles
+        _inspectionTitle = inspectionTitle; _calendarTitle = calendarTitle; self.calendarTitles = calendarTitles; self.calendarSubjects = calendarSubjects
         _selectedEquipment = State(initialValue: initialEquipment)
     }
     private var selection: Binding<String> {
@@ -35,9 +36,10 @@ struct ReportFactsEditor: View {
     }
     var body: some View {
         let equipment = selectedEquipment
+        let titles = calendarSubjects.isEmpty ? calendarTitles : calendarSubjects.filter { $0["equipment"] == equipment }.compactMap { $0["title"] }
         ReportEditor(report: Binding(get: { reports.first(where: { $0.equipment == equipment }) ?? ReportDraft(equipment: equipment) }, set: { value in
             if let index = reports.firstIndex(where: { $0.equipment == equipment }) { reports[index] = value }
-        }), reportSelection: selection, inspectionTitle: $inspectionTitle, calendarTitle: $calendarTitle, calendarTitles: calendarTitles).id(equipment)
+        }), reportSelection: selection, inspectionTitle: $inspectionTitle, calendarTitle: Binding(get: { titles.contains(calendarTitle) ? calendarTitle : "" }, set: { calendarTitle = $0 }), calendarTitles: titles).id(equipment)
     }
 }
 
@@ -195,19 +197,23 @@ struct ReportEditor: View {
                     }
                 }
                 TextField("Inspection title", text: $inspectionTitle, axis: .vertical)
+                if !calendarTitles.isEmpty {
+                    Button("Use selected title and outcome") { let chosen = calendarTitle; calendarTitle = chosen }.disabled(calendarTitle.isEmpty)
+                }
+                if !report.status.isEmpty { Text(report.status == "No OIs" ? "Outcome: No open items" : "Outcome: Open items").font(.caption).foregroundStyle(.secondary) }
             }
             Section {
-              DisclosureGroup("Outcome for custom titles") {
-                Picker("Result — explicit confirmation", selection: $report.status) {
-                    Text("Not confirmed").tag("")
-                    Text("Open items").tag("OIs")
-                    Text("No open items").tag("No OIs")
+                DisclosureGroup("Outcome for custom titles") {
+                    Picker("Result — explicit confirmation", selection: $report.status) {
+                        Text("Not confirmed").tag("")
+                        Text("Open items").tag("OIs")
+                        Text("No open items").tag("No OIs")
+                    }
                 }
                 if report.status == "No OIs" && !report.open_items.isEmpty {
                     Text("Remove or resolve the recorded findings before confirming No OIs. The server will reject conflicting results.").foregroundStyle(.red)
                 }
             }
-              }
             if report.equipment == "OT" {
                 Section("Other inspected item") {
                     Picker("Inspection type", selection: siteBinding("report_type", defaultValue: "Unknown / custom")) {
