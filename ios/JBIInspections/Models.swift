@@ -1,6 +1,7 @@
 import Foundation
 
 struct Attendee: Codable, Equatable, Identifiable {
+    static let defaultEngineerID = "6c7b7cdc-dc93-4b24-9b47-8b12c94b6a67"
     var id = UUID().uuidString
     var name = ""
     var company = ""
@@ -74,7 +75,7 @@ struct Inspection: Codable, Equatable, Identifiable {
         if attendees == nil && people.isEmpty {
             people = [Attendee(company: client ?? "", title: "Competent Person/Site Supervisor"),
                       Attendee(company: "NYC SCA", title: "Safety Inspector"),
-                      Attendee(name: "Kamruz Zaman", company: "DSENY Engineering Services PC", title: "PE")]
+                      Attendee(id: Attendee.defaultEngineerID, name: "Kamruz Zaman", company: "DSENY Engineering Services PC", title: "PE")]
         }
         if let first = people.first, first.title == "Competent Person/Site Supervisor",
            first.company.isEmpty || (previousClient != nil && first.company == previousClient), let client, !client.isEmpty {
@@ -85,7 +86,7 @@ struct Inspection: Codable, Equatable, Identifiable {
     mutating func insertAttendee(_ person: Attendee) {
         var people = sharedAttendees
         let last = people.last
-        let index = last?.company == "DSENY Engineering Services PC" && last?.title == "PE" ? max(0, people.count - 1) : people.count
+        let index = people.firstIndex(where: { $0.id == Attendee.defaultEngineerID }) ?? (last?.company == "DSENY Engineering Services PC" && last?.title == "PE" ? max(0, people.count - 1) : people.count)
         people.insert(person, at: index); sharedAttendees = people
     }
     // Called only for a user's title selection, never merely parsing a template.
