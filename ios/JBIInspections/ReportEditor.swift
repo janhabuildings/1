@@ -9,9 +9,14 @@ struct ReportFactsEditor: View {
     @Binding var reports: [ReportDraft]
     var project: String
     var inspectionDate: String
+    @Binding var inspectionTitle: String
+    @Binding var calendarTitle: String
+    var calendarTitles: [String]
+    var calendarSubjects: [[String: String]]
     @State private var selectedEquipment: String
-    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String) {
+    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String, inspectionTitle: Binding<String>, calendarTitle: Binding<String>, calendarTitles: [String], calendarSubjects: [[String: String]] = []) {
         _reports = reports; self.project = project; self.inspectionDate = inspectionDate
+        _inspectionTitle = inspectionTitle; _calendarTitle = calendarTitle; self.calendarTitles = calendarTitles; self.calendarSubjects = calendarSubjects
         _selectedEquipment = State(initialValue: initialEquipment)
     }
     private var selection: Binding<String> {
@@ -31,9 +36,10 @@ struct ReportFactsEditor: View {
     }
     var body: some View {
         let equipment = selectedEquipment
+        let titles = calendarSubjects.isEmpty ? calendarTitles : calendarSubjects.filter { $0["equipment"] == equipment }.compactMap { $0["title"] }
         ReportEditor(report: Binding(get: { reports.first(where: { $0.equipment == equipment }) ?? ReportDraft(equipment: equipment) }, set: { value in
             if let index = reports.firstIndex(where: { $0.equipment == equipment }) { reports[index] = value }
-        }), reportSelection: selection).id(equipment)
+        }), reportSelection: selection, inspectionTitle: $inspectionTitle, calendarTitle: Binding(get: { titles.contains(calendarTitle) ? calendarTitle : "" }, set: { calendarTitle = $0 }), calendarTitles: titles).id(equipment)
     }
 }
 
@@ -163,6 +169,9 @@ struct OpenItemTextCell: View {
 struct ReportEditor: View {
     @Binding var report: ReportDraft
     var reportSelection: Binding<String>? = nil
+    @Binding var inspectionTitle: String
+    @Binding var calendarTitle: String
+    var calendarTitles: [String]
     private var siteFields: [(String, String)] {
         report.equipment == "OT" ? [] : report.equipment == "SH" ? [("length_ft", "Approx. length (ft)"), ("sections", "Individual sections"),
             ("height_ft", "Max height (ft)"), ("width_ft", "Max width (ft)")] :
@@ -180,11 +189,26 @@ struct ReportEditor: View {
                     }.pickerStyle(.segmented)
                 }
             }
-            Section("Inspection result") {
-                Picker("Result — explicit confirmation", selection: $report.status) {
-                    Text("Not confirmed").tag("")
-                    Text("Open items").tag("OIs")
-                    Text("No open items").tag("No OIs")
+            Section("Inspection title") {
+                if !calendarTitles.isEmpty {
+                    Picker("Inspection title from calendar", selection: $calendarTitle) {
+                        Text("Choose a title…").tag("")
+                        ForEach(calendarTitles, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                TextField("Inspection title", text: $inspectionTitle, axis: .vertical)
+                if !calendarTitles.isEmpty {
+                    Button("Use selected title and outcome") { let chosen = calendarTitle; calendarTitle = chosen }.disabled(calendarTitle.isEmpty)
+                }
+                if !report.status.isEmpty { Text(report.status == "No OIs" ? "Outcome: No open items" : "Outcome: Open items").font(.caption).foregroundStyle(.secondary) }
+            }
+            Section {
+                DisclosureGroup("Outcome for custom titles") {
+                    Picker("Result — explicit confirmation", selection: $report.status) {
+                        Text("Not confirmed").tag("")
+                        Text("Open items").tag("OIs")
+                        Text("No open items").tag("No OIs")
+                    }
                 }
                 if report.status == "No OIs" && !report.open_items.isEmpty {
                     Text("Remove or resolve the recorded findings before confirming No OIs. The server will reject conflicting results.").foregroundStyle(.red)
@@ -220,17 +244,6 @@ struct ReportEditor: View {
             Section("Drawing status") {
                 drawingPicker("PE drawings on site", selection: $report.drawings_on_site)
                 drawingPicker("DOB / SCA approved", selection: $report.drawings_approved)
-            }
-            Section("Attendees") {
-                ForEach($report.attendees) { $attendee in
-                    VStack {
-                        HStack { TextField("Name", text: $attendee.name); CompactRemoveButton(label: "Remove attendee") { report.attendees.removeAll { $0.id == attendee.id } } }
-                        MultiChoiceField(label: "Company / agency", value: $attendee.company, options: AttendeeOptions.companies)
-                        MultiChoiceField(label: "Role", value: $attendee.title, options: AttendeeOptions.roles)
-                    }
-                }.onDelete { report.attendees.remove(atOffsets: $0) }
-                Button("Add attendee") { report.attendees.append(Attendee()) }
-                Text("Template names are not proof of attendance. Identify the inspecting PE.").font(.caption)
             }
             if report.equipment != "OT" { Section("Equipment dimensions and details") {
                 ForEach(siteFields, id: \.0) { key, label in

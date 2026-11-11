@@ -37,12 +37,22 @@ class WebWorkflow(unittest.TestCase):
     def tearDown(self):
         self.page.close();self.browser.close();self.playwright.stop()
         self.server.should_exit=True;self.thread.join(10);self.temp.cleanup()
-    def connect(self):
+    def connect(self,preserve_defaults=False):
         self.page.locator('#token').fill('fixture-browser-token')
         self.page.get_by_role('button',name='Connect',exact=True).click()
         self.page.locator('#workspace').wait_for(state='visible')
         from playwright.sync_api import expect
         expect(self.page.locator('#save')).to_be_enabled()
+        # Legacy workflow fixtures start with an intentionally empty attendee list.
+        if not preserve_defaults:self.page.evaluate('state.attendees=[];renderAttendees()')
+    def fill_title(self,text):
+        current=self.page.locator('.tab.active').get_attribute('data-tab')
+        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('#title').fill(text)
+        self.page.locator('[data-tab='+current+']').click()
+    def choose_calendar_title(self,title):
+        self.page.locator('[data-tab=reports]').click()
+        self.page.locator('#calendar-title').select_option(title)
     def fill_calendar(self,text):
         control=self.page.locator('#calendar-content')
         if control.get_attribute('open') is None:control.locator('summary').click()
@@ -77,6 +87,60 @@ class WebWorkflow(unittest.TestCase):
         expect(note).to_have_value('Location: North elevation, bay 2\nCondition: Loose plank')
         self.assertEqual(self.errors,[])
 
+    def test_default_attendees_title_outcome_and_capture_attendee(self):
+        from playwright.sync_api import expect
+        from PIL import Image
+        import io
+        self.connect(preserve_defaults=True)
+        rows=self.page.locator('.attendee-row')
+        expect(rows).to_have_count(3)
+        expect(rows.last.get_by_placeholder('Name',exact=True)).to_have_value('Kamruz Zaman')
+        self.fill_calendar('2026-11-10 TEST Supported Scaffold-I-Inspection-OIs\n2026-11-10 TEST Supported Scaffold-I-Inspection- PE CERT OF USE\nClient: Calendar contractor\nProject: TEST')
+        self.page.locator('#extract').click()
+        expect(rows.first).to_contain_text('Calendar contractor')
+        expect(rows.first).to_contain_text('Competent Person/Site Supervisor')
+        expect(rows.nth(1)).to_contain_text('NYC SCA')
+        expect(rows.nth(1)).to_contain_text('Safety Inspector')
+        self.page.locator('#add-attendee').click()
+        expect(rows).to_have_count(4)
+        expect(rows.last.get_by_placeholder('Name',exact=True)).to_have_value('Kamruz Zaman')
+        self.page.locator('[data-tab=reports]').click()
+        expect(self.page.locator('#title')).to_be_visible()
+        self.page.locator('#calendar-title').select_option(index=2)
+        expect(self.page.get_by_label('Outcome for custom title',exact=True)).to_have_value('No OIs')
+        self.page.locator('[data-tab=evidence]').click()
+        self.page.locator('#capture-name').fill('Photo contact')
+        self.page.locator('#capture-company').fill('Calendar contractor')
+        self.page.locator('#capture-role').select_option('Competent Person')
+        data=io.BytesIO();Image.new('RGB',(8,8),'white').save(data,format='JPEG')
+        self.page.locator('#upload').set_input_files({'name':'attendee.jpg','mimeType':'image/jpeg','buffer':data.getvalue()})
+        expect(self.page.get_by_label('Location / observation',exact=True)).to_have_value('Attendee: Photo contact\nCompany: Calendar contractor\nRole: Competent Person')
+        saved=self.app.state.store.list()[0]
+        self.assertEqual(saved['attendees'][-1]['name'],'Kamruz Zaman')
+        self.assertEqual(saved['attendees'][-2]['name'],'Photo contact')
+        self.assertEqual(saved['reports'][0]['attendees'],saved['attendees'])
+        self.assertEqual(self.errors,[])
+
+    def test_legacy_report_attendees_merge_without_losing_people(self):
+        from playwright.sync_api import expect
+        import uuid
+        first={'id':str(uuid.uuid4()),'name':'First report person','company':'Client','title':'Competent Person'}
+        second={'id':str(uuid.uuid4()),'name':'Second report person','company':'NYC SCA','title':'Safety Inspector'}
+        identity=str(uuid.uuid4())
+        self.app.state.store.save({'id':identity,'title':'Legacy inspection','inspection_date':'2026-11-10',
+            'attendees':[first], 'reports':[{'equipment':'SF','attendees':[first]},{'equipment':'SH','attendees':[second]}]})
+        self.connect()
+        self.page.locator('#saved').select_option(identity)
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
+        names=self.page.get_by_placeholder('Name',exact=True)
+        expect(names).to_have_count(2)
+        expect(names.nth(1)).to_have_value('Second report person')
+        self.page.locator('#save').click()
+        expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        record=self.app.state.store.get(identity)
+        self.assertEqual(len(record['attendees']),2)
+        for report in record['reports']:self.assertEqual(report['attendees'],record['attendees'])
+
     def add_separate_report(self,equipment):
         control=self.page.locator('#separate-reports')
         if control.get_attribute('open') is None:control.locator('summary').click()
@@ -110,7 +174,7 @@ class WebWorkflow(unittest.TestCase):
     def test_manual_inspection_upload_reports_download_and_empty_library(self):
         from playwright.sync_api import expect
         self.connect()
-        self.page.locator('#title').fill('Browser fixture visit')
+        self.fill_title('Browser fixture visit')
         self.page.locator('#project').fill('BROWSER-TEST')
         self.page.locator('#inspection_date').fill('2026-10-15')
         self.page.locator('#request_date').fill('2026-10-08')
@@ -139,9 +203,9 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#add-SF').click();self.add_separate_report('SH')
         cards=self.page.locator('.report-card')
         self.page.locator('#add-SF').click()
-        cards.nth(0).get_by_label('Inspection result',exact=True).select_option('OIs')
+        cards.nth(0).get_by_label('Outcome for custom title',exact=True).select_option('OIs')
         self.page.locator('#add-SH').click()
-        cards.nth(1).get_by_label('Inspection result',exact=True).select_option('No OIs')
+        cards.nth(1).get_by_label('Outcome for custom title',exact=True).select_option('No OIs')
         self.page.locator('#add-SF').click()
         cards.nth(0).get_by_role('button',name='+ Add open item').click()
         cards.nth(0).get_by_label('Location / occurrence',exact=True).fill('North facade, bay 2')
@@ -176,7 +240,7 @@ class WebWorkflow(unittest.TestCase):
         from playwright.sync_api import expect
         from tests.test_report_updates import test_image
         self.connect()
-        self.page.locator('#title').fill('Delete fixture')
+        self.fill_title('Delete fixture')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         identity=self.app.state.store.list()[0]['id']
@@ -308,7 +372,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('[data-tab=reports]').click()
         self.page.get_by_role('tab',name='Scaffold',exact=True).click()
         scaffold=self.page.locator('#report-SF')
-        scaffold.get_by_label('Inspection result',exact=True).select_option('No OIs')
+        scaffold.get_by_label('Outcome for custom title',exact=True).select_option('No OIs')
         scaffold.get_by_label('Permit number',exact=True).fill('M01149657')
         scaffold.get_by_label('Actually inspected locations / extents',exact=True).fill('All sheds')
         scaffold.get_by_label('Horizontal tie spacing',exact=True).fill('20')
@@ -318,7 +382,7 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.get_by_role('tab',name='Shed',exact=True)).to_have_attribute('aria-selected','true')
         self.assertEqual(shed.get_by_label('Permit number',exact=True).input_value(),'M01149657')
         self.assertEqual(shed.get_by_label('Actually inspected locations / extents',exact=True).input_value(),'All sheds')
-        self.assertEqual(shed.get_by_label('Inspection result',exact=True).input_value(),'No OIs')
+        self.assertEqual(shed.get_by_label('Outcome for custom title',exact=True).input_value(),'No OIs')
         shed.get_by_label('Individual sections',exact=True).fill('2')
         self.assertEqual(self.page.locator('.report-card').count(),1)
         self.page.get_by_role('tab',name='Other',exact=True).click()
@@ -347,17 +411,19 @@ class WebWorkflow(unittest.TestCase):
         second='2026-05-11 PS87Q Supported Scaffold-I-Inspection-No OIs'
         self.fill_calendar(first+'\n'+second)
         self.page.locator('#extract').click()
+        self.page.locator('[data-tab=reports]').click()
         expect(self.page.locator('#calendar-title-options')).to_be_visible()
         self.assertEqual(self.page.locator('#calendar-title').input_value(), '')
         self.assertEqual(self.page.locator('#title').input_value(), '')
         original_date=self.page.locator('#inspection_date').input_value()
-        self.page.locator('#calendar-title').select_option(second)
+        self.choose_calendar_title(second)
         self.page.locator('#use-calendar-title').click()
         self.assertEqual(self.page.locator('#title').input_value(), second)
         self.assertEqual(self.page.locator('#inspection_date').input_value(), original_date)
+        self.page.locator('[data-tab=inspection]').click()
         self.page.locator('#apply-calendar').click()
         self.page.locator('[data-tab=reports]').click()
-        self.assertEqual(self.page.get_by_label('Inspection result',exact=True).input_value(), '')
+        self.assertEqual(self.page.get_by_label('Outcome for custom title',exact=True).input_value(), 'No OIs')
         self.page.locator('#save').click()
         expect(self.page.locator('#save-state')).to_contain_text('Saved')
         self.assertEqual(self.app.state.store.list()[0]['title'], second)
@@ -438,12 +504,13 @@ class WebWorkflow(unittest.TestCase):
         from playwright.sync_api import expect
         expect(self.page.locator('#extract')).to_be_enabled()
         self.page.once('dialog',lambda dialog:dialog.accept())
+        self.page.locator('[data-tab=inspection]').click()
         self.page.locator('#apply-calendar').click()
         self.assertEqual(self.page.locator('#client').input_value(),'Calendar Fixture')
         self.assertEqual(self.page.locator('#requested_by').input_value(),'Example Contact Example Company')
         self.assertEqual(self.page.locator('#address').input_value(),'123 Example Street')
         self.page.locator('[data-tab=reports]').click()
-        self.assertEqual(self.page.locator('.report-card').get_by_label('Inspection result',exact=True).input_value(),'')
+        self.assertEqual(self.page.locator('.report-card').get_by_label('Outcome for custom title',exact=True).input_value(),'')
         self.assertEqual(self.errors,[])
 
 
@@ -464,15 +531,15 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.locator('#report-SH').count(),0)
         self.assertEqual(self.page.locator('#report-SF').count(),0)
         self.assertEqual(self.page.get_by_label('Inspection number · VII / VIII',exact=True).input_value(),'')
-        self.assertEqual(self.page.get_by_label('Inspection result',exact=True).input_value(),'')
+        self.assertEqual(self.page.get_by_label('Outcome for custom title',exact=True).input_value(),'')
         self.page.locator('[data-tab=inspection]').click()
         titles=self.page.locator('#calendar-title option').all_text_contents()[1:]
-        self.page.locator('#calendar-title').select_option(titles[0])
+        self.choose_calendar_title(titles[0])
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.get_by_label('Inspection number · VII / VIII',exact=True)).to_have_value('V')
         expect(self.page.get_by_label('Item name (for unknown / custom)',exact=True)).to_have_value('Main Building Interior Shoring')
         self.page.locator('[data-tab=inspection]').click()
-        self.page.locator('#calendar-title').select_option(titles[2])
+        self.choose_calendar_title(titles[2])
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.get_by_label('Inspection number · VII / VIII',exact=True)).to_have_value('VI')
         expect(self.page.get_by_label('Item name (for unknown / custom)',exact=True)).to_have_value('Field House Interior Shoring')
@@ -480,12 +547,13 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.get_by_label('Permit number',exact=True).input_value(),'')
         self.page.get_by_label('Inspection number · VII / VIII',exact=True).fill('IX')
         self.page.locator('[data-tab=inspection]').click()
-        self.page.locator('#calendar-title').select_option(titles[0])
+        self.choose_calendar_title(titles[0])
+        self.page.locator('[data-tab=inspection]').click()
         expect(self.page.locator('#calendar-report-notice')).to_contain_text('Existing entries were kept')
         self.page.locator('[data-tab=reports]').click()
         expect(self.page.get_by_label('Inspection number · VII / VIII',exact=True)).to_have_value('IX')
         self.page.locator('[data-tab=inspection]').click()
-        self.page.locator('#calendar-title').select_option(titles[2])
+        self.choose_calendar_title(titles[2])
         self.page.locator('[data-tab=reports]').click()
         self.page.get_by_label('Inspection number · VII / VIII',exact=True).fill('VI')
         self.assertEqual(self.page.evaluate('state.reports[0].inspection_code'),'VI')
@@ -553,7 +621,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#request_date').fill('2026-10-24')
         self.page.locator('[data-tab=reports]').click()
         self.page.locator('#add-SF').click()
-        self.page.get_by_label('Inspection result',exact=True).select_option('OIs')
+        self.page.get_by_label('Outcome for custom title',exact=True).select_option('OIs')
         self.page.get_by_label('Permit number',exact=True).fill('PREVIEW-PERMIT-123')
         self.page.get_by_role('button',name='+ Add open item',exact=True).click()
         self.page.get_by_label('Location / occurrence',exact=True).fill('North side')
@@ -583,7 +651,7 @@ class WebWorkflow(unittest.TestCase):
         self.page.locator('#request_date').fill('2026-10-24')
         self.page.locator('[data-tab=reports]').click()
         self.page.locator('#add-SH').click()
-        self.page.get_by_label('Inspection result',exact=True).select_option('No OIs')
+        self.page.get_by_label('Outcome for custom title',exact=True).select_option('No OIs')
         self.page.locator('#preview-current').click()
         expect(self.page.locator('#report-preview')).to_be_visible(timeout=60000)
         source=self.page.locator('#preview-frame').get_attribute('src')
@@ -650,6 +718,7 @@ class WebWorkflow(unittest.TestCase):
         saved=self.app.state.store.list()[0]
         self.assertEqual(saved['reports'][0]['site']['report_type'],'SStab')
         self.page.reload();self.connect();self.page.locator('#saved').select_option(saved['id'])
+        expect(self.page.locator('#save-state')).to_contain_text('Loaded saved inspection')
         expect(self.page.get_by_placeholder('Name',exact=True)).to_have_value('Example Engineer')
         expect(self.page.locator('.choice-cell').filter(has_text='DSENY Engineering Services PC')).to_be_visible()
         self.assertEqual(self.errors,[])

@@ -2,6 +2,7 @@ import SwiftUI
 import QuickLook
 import PhotosUI
 import AVFoundation
+import AVKit
 import MessageUI
 import UniformTypeIdentifiers
 import ImageIO
@@ -129,6 +130,13 @@ struct InspectionDetail: View {
     @State private var photoLocation = ""
     @State private var photoCondition = ""
     @State private var photoEquipment = ""
+    @State private var captureSessionActive = false
+    @State private var photoAttendeeID = ""
+    @State private var photoPersonName = ""
+    @State private var photoCompany = ""
+    @State private var photoRole = ""
+    @State private var transcriptionID: String?
+    @State private var transcriptionMessage = ""
     @State private var photoSelection: [PhotosPickerItem] = []
     @State private var importFile = false
     @State private var recordConsent = false
@@ -159,6 +167,7 @@ struct InspectionDetail: View {
     var body: some View {
         Form {
             basics
+            attendeesSection
             capture
             media
             Section("Transcript and field notes") {
@@ -226,7 +235,13 @@ struct InspectionDetail: View {
         }
         .navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
         .navigationDestination(for: ReportRoute.self) { route in
-            ReportFactsEditor(reports: $inspection.reports, project: inspection.project, inspectionDate: inspection.inspection_date, initialEquipment: route.equipment)
+            ReportFactsEditor(reports: $inspection.reports, project: inspection.project, inspectionDate: inspection.inspection_date, initialEquipment: route.equipment, inspectionTitle: $inspection.title, calendarTitle: Binding(get: { selectedCalendarTitle }, set: { title in
+                let previous = selectedCalendarTitle; selectedCalendarTitle = title
+                if !title.isEmpty {
+                    applyCalendar(previousTitle: previous)
+                    inspection.confirmCalendarTitle(title, candidates: calendarCandidates ?? inspection.calendar_candidates)
+                }
+            }), calendarTitles: calendarCandidates?.titles ?? inspection.calendar_candidates?.titles ?? [], calendarSubjects: calendarCandidates?.report_subjects ?? inspection.calendar_candidates?.report_subjects ?? [])
         }
         .onChange(of: inspection) { _, value in store.save(value); scheduleSync() }
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
@@ -244,6 +259,7 @@ struct InspectionDetail: View {
             }
         }
         .task {
+            inspection.prepareAttendees()
             calendarCandidates = inspection.calendar_candidates
             if let candidates = calendarCandidates, candidates.titles?.contains(inspection.title) == true { selectedCalendarTitle = inspection.title }
             if store.connected {
@@ -255,8 +271,20 @@ struct InspectionDetail: View {
         } message: { Text(confirmationMessage) }
         .sheet(isPresented: $camera, onDismiss: {
             if capturedPhotoID != nil { showPhotoNotes = true }
-        }) { CameraView(captured: saveCapturedPhoto).ignoresSafeArea() }
-        .sheet(isPresented: $showPhotoNotes, onDismiss: { capturedPhotoID = nil }) { photoNotes }
+        }) { CameraView(captured: saveCapturedPhoto, recorded: saveCapturedVideo, closed: {
+            captureSessionActive = false; camera = false
+        }).ignoresSafeArea() }
+        .sheet(isPresented: $showPhotoNotes, onDismiss: {
+            commitCaptureAttendee(); capturedPhotoID = nil
+            if captureSessionActive { camera = true }
+        }) { photoNotes }
+        .confirmationDialog("Transcribe recording", isPresented: Binding(get: { transcriptionID != nil }, set: { if !$0 { transcriptionID = nil } }), titleVisibility: .visible) {
+            if let id = transcriptionID {
+                Button("On this device") { transcribeMedia(id, allowNetwork: false) }
+                Button("Allow Apple speech service") { transcribeMedia(id, allowNetwork: true) }
+            }
+            Button("Cancel", role: .cancel) { transcriptionID = nil }
+        } message: { Text("On-device transcription keeps audio on your phone. Allow Apple speech service may send this recording to Apple and requires internet access.") }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
         .quickLookPreview($reportPreviewURL)
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments, sender: $0.sender, to: $0.to, cc: $0.cc) }
@@ -321,7 +349,6 @@ struct InspectionDetail: View {
     }
     private var basics: some View {
         Section("Inspection") {
-            TextField("Title", text: $inspection.title)
             TextField("Project", text: $inspection.project)
             if let project = calendarCandidates?.fields["project"], !project.isEmpty, project != inspection.project {
                 Button("Use calendar project: " + project) {
@@ -345,34 +372,85 @@ struct InspectionDetail: View {
             if let value = inspection.request_date, !value.isEmpty { LabeledContent("Request date", value: value) }
             if let value = inspection.requested_by, !value.isEmpty { LabeledContent("Requested by", value: value) }
             if let value = inspection.address, !value.isEmpty { LabeledContent("Address", value: value) }
-            if let titles = calendarCandidates?.titles, !titles.isEmpty {
-                Picker("Inspection title from calendar", selection: $selectedCalendarTitle) {
-                    Text("Choose a title…").tag("")
-                    ForEach(titles, id: \.self) { title in Text(title).tag(title) }
-                }.pickerStyle(.menu)
-                    .onChange(of: selectedCalendarTitle) { previous, title in
-                        if !title.isEmpty { applyCalendar(previousTitle: previous) }
-                    }
-                Text("Choose a title when several are listed. Calendar dates fill on extraction. Review the dates and confirm the report outcome separately.").font(.caption)
-            }
+
         }
     }
     private var capture: some View {
         Section("Capture") {
-            Button("Take inspection photo", systemImage: "camera") {
-                guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "A physical iPhone camera is required."; return }
+            Button("Open camera · photo or video", systemImage: "camera") {
+                finishRecording()
+                guard AVCaptureDevice.default(for: .video) != nil else { store.error = "A physical iPhone camera is required."; return }
                 AVCaptureDevice.requestAccess(for: .video) { granted in
-                    Task { @MainActor in if granted { camera = true } else { store.error = "Enable camera permission in iPhone Settings." } }
+                    Task { @MainActor in if granted { captureSessionActive = true; camera = true } else { store.error = "Enable camera permission in iPhone Settings." } }
                 }
             }
             PhotosPicker(selection: $photoSelection, maxSelectionCount: 100, matching: .images) { Label("Import photos", systemImage: "photo") }
-            Text("After taking a photo, add its location, condition and equipment. Notes remain editable with the photo.").font(.caption).foregroundStyle(.secondary)
+            Text("Capture photos or video with sound. Add details after each capture, then continue until you return to the inspection.").font(.caption).foregroundStyle(.secondary)
             Button(audio.recording ? "Stop recording" : "Record on-site conversation", systemImage: audio.recording ? "stop.circle.fill" : "mic") {
                 if audio.recording { finishRecording() } else { recordConsent = true }
             }.foregroundStyle(audio.recording ? Color.red : Color.accentColor)
             if audio.recording { Label("Recording in progress", systemImage: "waveform").foregroundStyle(.red) }
             Button("Import audio or a transcript", systemImage: "square.and.arrow.down") { importFile = true }
         }
+    }
+    private var attendeeBinding: Binding<[Attendee]> {
+        Binding(get: { inspection.sharedAttendees }, set: { inspection.sharedAttendees = $0 })
+    }
+    private var attendeesSection: some View {
+        Section("Attendees") {
+            ForEach(attendeeBinding) { $person in
+                VStack(alignment: .leading) {
+                    HStack {
+                        TextField("Name", text: $person.name)
+                        CompactRemoveButton(label: "Remove attendee") { inspection.sharedAttendees.removeAll { $0.id == person.id } }
+                    }
+                    MultiChoiceField(label: "Company / agency", value: $person.company, options: AttendeeOptions.companies + [inspection.client ?? ""].filter { !$0.isEmpty })
+                    MultiChoiceField(label: "Role", value: $person.title, options: AttendeeOptions.roles)
+                }
+            }
+            Button("Add attendee") { inspection.insertAttendee(Attendee()) }
+            Text("Review the preset rows and enter the people who attended. This list is used in every report.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private func transcribeMedia(_ id: String, allowNetwork: Bool) {
+        guard let item = store.cache.media.first(where: { $0.id == id }) else { return }
+        transcriptionMessage = "Transcribing recording…"
+        Task {
+            do {
+                let text = try await audio.transcribe(store.mediaURL(item), allowNetwork: allowNetwork)
+                inspection.transcript += (inspection.transcript.isEmpty ? "" : "\n\n") + text
+                transcriptionMessage = "Transcription added to Transcript and field notes."
+                store.save(inspection); scheduleSync()
+            } catch {
+                transcriptionMessage = "Transcription failed: " + error.localizedDescription
+                store.error = transcriptionMessage
+            }
+        }
+    }
+    private func resetCaptureNotes() {
+        photoLocation = ""; photoCondition = ""; photoEquipment = ""
+        photoAttendeeID = ""; photoPersonName = ""; photoCompany = ""; photoRole = ""
+    }
+    private func commitCaptureAttendee() {
+        guard !photoPersonName.isEmpty || !photoCompany.isEmpty || !photoRole.isEmpty else { return }
+        var people = inspection.sharedAttendees
+        if let index = people.firstIndex(where: { $0.id == photoAttendeeID }) {
+            people[index].name = photoPersonName; people[index].company = photoCompany; people[index].title = photoRole
+            inspection.sharedAttendees = people
+        } else if !people.contains(where: { $0.name == photoPersonName && $0.company == photoCompany && $0.title == photoRole }) {
+            inspection.insertAttendee(Attendee(name: photoPersonName, company: photoCompany, title: photoRole))
+        }
+        store.save(inspection); scheduleSync()
+    }
+    private func saveCapturedVideo(_ url: URL) {
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let data = try Data(contentsOf: url)
+            guard data.count <= 40 * 1024 * 1024 else { throw APIError(message: "Video exceeds the 40 MB upload limit. Record a shorter clip.") }
+            resetCaptureNotes()
+            capturedPhotoID = try store.addMedia(data, to: inspection, kind: "video", mime: "video/quicktime", ext: "mov")
+            scheduleSync(); camera = false
+        } catch { store.error = error.localizedDescription }
     }
     private var media: some View {
         Section("Photo and audio evidence") {
@@ -385,6 +463,8 @@ struct InspectionDetail: View {
                             set: { value in
                                 if value { selectedAIPhotos.insert(item.id) } else { selectedAIPhotos.remove(item.id) }
                             }))
+                    } else if item.kind == "video" {
+                        VideoPlayer(player: AVPlayer(url: store.mediaURL(item))).frame(height: 210)
                     } else { Label("Audio recording", systemImage: "waveform") }
                     Picker("Equipment", selection: mediaBinding(item.id, \.equipment)) {
                         Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
@@ -392,20 +472,14 @@ struct InspectionDetail: View {
                     TextField("Location / observation", text: mediaBinding(item.id, \.note), axis: .vertical)
                         .onChange(of: item.note) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
                         .onChange(of: item.equipment) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
-                    if item.kind == "photo" || item.kind == "audio" {
+                    if ["photo", "audio", "video"].contains(item.kind) {
                         Button("Delete evidence", role: .destructive) { removeMediaID = item.id }.buttonStyle(.borderless)
                     }
                     HStack {
                         Button("Share") { share = SharedItems(items: [store.mediaURL(item)]) }.buttonStyle(.borderless)
                         if item.kind == "audio" {
-                            Button(audio.transcribing ? "Transcribing…" : "Transcribe on device") {
-                                Task {
-                                    do {
-                                        let text = try await audio.transcribe(store.mediaURL(item))
-                                        inspection.transcript += (inspection.transcript.isEmpty ? "" : "\n\n") + text
-                                    } catch { store.error = error.localizedDescription }
-                                }
-                            }.disabled(audio.transcribing).buttonStyle(.borderless)
+                            Button(audio.transcribing ? "Transcribing…" : "Transcribe recording") { transcriptionID = item.id }.disabled(audio.transcribing).buttonStyle(.borderless)
+                            if !transcriptionMessage.isEmpty { Text(transcriptionMessage).font(.caption) }
                         }
                     }
                     Text(item.uploaded ? "Uploaded to backend" : "Saved on this phone").font(.caption).foregroundStyle(.secondary)
@@ -481,6 +555,7 @@ struct InspectionDetail: View {
     private func addReport(_ type: String) {
         var report = ReportDraft(equipment: type)
         report.project = inspection.project; report.inspection_date = inspection.inspection_date
+        report.attendees = inspection.sharedAttendees
         let candidates = calendarCandidates ?? inspection.calendar_candidates ?? CalendarCandidates(fields: [:], equipment: [])
         candidates.fill(&report, inspection: inspection, selectedTitle: selectedCalendarTitle)
         inspection.reports.append(report)
@@ -491,32 +566,52 @@ struct InspectionDetail: View {
                 if let id = capturedPhotoID, let item = store.cache.media.first(where: { $0.id == id }),
                    let image = evidenceImage(store.mediaURL(item).path) {
                     Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 220)
+                } else if let id = capturedPhotoID, let item = store.cache.media.first(where: { $0.id == id }), item.kind == "video" {
+                    VideoPlayer(player: AVPlayer(url: store.mediaURL(item))).frame(height: 220)
                 }
-                Section("Photo notes") {
+                Section("Capture notes") {
                     TextField("Location · floor, elevation, bay", text: $photoLocation, axis: .vertical)
                     TextField("Condition / observation", text: $photoCondition, axis: .vertical)
                     Picker("Equipment", selection: $photoEquipment) {
                         Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
                     }
-                    Text("Photo saved on this phone. Notes save as you type; cloud sync follows when connected.").font(.caption).foregroundStyle(.secondary)
+                    Picker("Attendee", selection: $photoAttendeeID) {
+                        Text("No attendee / new person").tag("")
+                        ForEach(inspection.sharedAttendees) { person in Text(person.name.isEmpty ? person.company + " · " + person.title : person.name).tag(person.id) }
+                    }
+                    TextField("Attendee name", text: $photoPersonName)
+                    MultiChoiceField(label: "Company / agency", value: $photoCompany, options: AttendeeOptions.companies + [inspection.client ?? ""].filter { !$0.isEmpty })
+                    MultiChoiceField(label: "Role", value: $photoRole, options: AttendeeOptions.roles)
+                    Text("Capture saved on this phone. Notes save as you type. Attendee details are shared with the inspection when you finish.").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Photo details")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showPhotoNotes = false } } }
+            .navigationTitle("Capture details")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Save & next") { showPhotoNotes = false } }
+                ToolbarItem(placement: .cancellationAction) { Button("Back to inspection") { captureSessionActive = false; showPhotoNotes = false } }
+            }
+            .onChange(of: photoAttendeeID) { _, id in
+                if let person = inspection.sharedAttendees.first(where: { $0.id == id }) {
+                    photoPersonName = person.name; photoCompany = person.company; photoRole = person.title
+                }
+            }
+            .onChange(of: photoPersonName) { _, _ in saveCapturedPhotoNotes() }
+            .onChange(of: photoCompany) { _, _ in saveCapturedPhotoNotes() }
+            .onChange(of: photoRole) { _, _ in saveCapturedPhotoNotes() }
             .onChange(of: photoLocation) { _, _ in saveCapturedPhotoNotes() }
             .onChange(of: photoCondition) { _, _ in saveCapturedPhotoNotes() }
             .onChange(of: photoEquipment) { _, _ in saveCapturedPhotoNotes() }
         }
     }
     private func saveCapturedPhoto(_ image: UIImage) {
-        photoLocation = ""; photoCondition = ""; photoEquipment = ""
-        capturedPhotoID = savePhoto(image)
+        resetCaptureNotes()
+        capturedPhotoID = savePhoto(image); camera = false
     }
     private func saveCapturedPhotoNotes() {
         guard let id = capturedPhotoID, let index = store.cache.media.firstIndex(where: { $0.id == id }) else { return }
         let location = photoLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         let condition = photoCondition.trimmingCharacters(in: .whitespacesAndNewlines)
-        store.cache.media[index].note = [location.isEmpty ? "" : "Location: " + location, condition.isEmpty ? "" : "Condition: " + condition].filter { !$0.isEmpty }.joined(separator: "\n")
+        store.cache.media[index].note = [location.isEmpty ? "" : "Location: " + location, condition.isEmpty ? "" : "Condition: " + condition, photoPersonName.isEmpty ? "" : "Attendee: " + photoPersonName, photoCompany.isEmpty ? "" : "Company: " + photoCompany, photoRole.isEmpty ? "" : "Role: " + photoRole].filter { !$0.isEmpty }.joined(separator: "\n")
         store.cache.media[index].equipment = photoEquipment
         store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync()
     }
