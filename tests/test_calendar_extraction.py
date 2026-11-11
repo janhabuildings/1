@@ -3,6 +3,16 @@ from backend.core import calendar_candidates
 
 
 class CalendarExtraction(unittest.TestCase):
+    def test_title_equipment_codes_and_unknown_names(self):
+        from backend.inspection_titles import equipment_code
+        for name,code in [('Sidewalk Shed','SH'),('Supported Scaffold','SF'),('Support of Excavation','SOE'),
+                          ('Structural Stability','SStab'),('Fall Protection','FP'),('Custom Netting','Custom Netting')]:
+            self.assertEqual(equipment_code(name),code)
+        value=calendar_candidates('''2026-11-10 Project Support of Excavation-I-Inspection-OIs
+2026-11-10 Project Structural Stability-II-Inspection-OIs
+2026-11-10 Project Fall Protection-III-Inspection-OIs''')
+        self.assertEqual(value['equipment_labels'],['SOE','SStab','FP'])
+
     def test_unfilled_full_template_has_no_calendar_facts(self):
         value = calendar_candidates('''YYYY-MM-MM Project/Location Sidewalk Shed-RMN#-Inspection-OIs
 Client:\t \tProject:\t 

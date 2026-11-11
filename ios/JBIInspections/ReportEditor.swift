@@ -29,42 +29,36 @@ struct AttendeeListFields: View {
 }
 
 struct ReportFactsEditor: View {
-    @Binding var reports: [ReportDraft]
-    var attendees: [Attendee]
-    var attendeeClient: String
-    var project: String
-    var inspectionDate: String
-    @Binding var inspectionTitle: String
-    @Binding var calendarTitle: String
-    var calendarTitles: [String]
-    var calendarSubjects: [[String: String]]
+    @Binding var inspection: Inspection
+    var candidates: CalendarCandidates?
     @State private var selectedEquipment: String
-    init(reports: Binding<[ReportDraft]>, project: String, inspectionDate: String, initialEquipment: String, inspectionTitle: Binding<String>, calendarTitle: Binding<String>, calendarTitles: [String], calendarSubjects: [[String: String]] = [], attendees: [Attendee], attendeeClient: String) {
-        _reports = reports; self.attendees = attendees; self.attendeeClient = attendeeClient; self.project = project; self.inspectionDate = inspectionDate
-        _inspectionTitle = inspectionTitle; _calendarTitle = calendarTitle; self.calendarTitles = calendarTitles; self.calendarSubjects = calendarSubjects
+    init(inspection: Binding<Inspection>, candidates: CalendarCandidates?, initialEquipment: String) {
+        _inspection = inspection; self.candidates = candidates
         _selectedEquipment = State(initialValue: initialEquipment)
     }
     private var selection: Binding<String> {
         Binding(get: { selectedEquipment }, set: { equipment in
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            if !reports.contains(where: { $0.equipment == equipment }) {
-                if let index = reports.firstIndex(where: { $0.equipment == selectedEquipment }) {
-                    reports[index].equipment = equipment
-                } else {
-                    var draft = ReportDraft(equipment: equipment)
-                    draft.project = project; draft.inspection_date = inspectionDate
-                    reports.append(draft)
-                }
+            if !inspection.reports.contains(where: { $0.equipment == equipment }), let index = inspection.reports.firstIndex(where: { $0.equipment == selectedEquipment }) {
+                inspection.reports[index].equipment = equipment
+                inspection.reports[index].calendar_title = nil
+                inspection.reports[index].stamp_requested = false
+                inspection.refreshTitle(force: true)
             }
             selectedEquipment = equipment
         })
     }
     var body: some View {
         let equipment = selectedEquipment
-        let titles = calendarSubjects.isEmpty ? calendarTitles : calendarSubjects.filter { $0["equipment"] == equipment }.compactMap { $0["title"] }
-        ReportEditor(report: Binding(get: { reports.first(where: { $0.equipment == equipment }) ?? ReportDraft(equipment: equipment) }, set: { value in
-            if let index = reports.firstIndex(where: { $0.equipment == equipment }) { reports[index] = value }
-        }), reportSelection: selection, inspectionTitle: $inspectionTitle, calendarTitle: Binding(get: { titles.contains(calendarTitle) ? calendarTitle : "" }, set: { calendarTitle = $0 }), calendarTitles: titles, inspectionAttendees: attendees, attendeeClient: attendeeClient).id(equipment)
+        let subjects = candidates?.report_subjects ?? []
+        let titles = subjects.filter { $0["equipment"] == equipment }.compactMap { $0["title"] }
+        ReportEditor(report: Binding(get: { inspection.reports.first(where: { $0.equipment == equipment }) ?? ReportDraft(equipment: equipment) }, set: { value in
+            if let index = inspection.reports.firstIndex(where: { $0.equipment == equipment }) { inspection.reports[index] = value }
+        }), reportSelection: selection, calendarTitles: titles, chooseCalendarTitle: { title in
+            if title.isEmpty {
+                if let index = inspection.reports.firstIndex(where: { $0.equipment == equipment }) { inspection.reports[index].calendar_title = nil }
+            } else { inspection.confirmCalendarTitle(title, candidates: candidates) }
+        }, inspectionAttendees: inspection.sharedAttendees, attendeeClient: inspection.client ?? "").id(equipment)
     }
 }
 
@@ -194,9 +188,8 @@ struct OpenItemTextCell: View {
 struct ReportEditor: View {
     @Binding var report: ReportDraft
     var reportSelection: Binding<String>? = nil
-    @Binding var inspectionTitle: String
-    @Binding var calendarTitle: String
     var calendarTitles: [String]
+    var chooseCalendarTitle: (String) -> Void
     var inspectionAttendees: [Attendee]
     var attendeeClient: String
     @State private var attendeesExpanded = false
@@ -218,22 +211,19 @@ struct ReportEditor: View {
                     }.pickerStyle(.segmented)
                 }
             }
-            Section("Inspection title") {
+            Section("Inspection title from calendar") {
                 if !calendarTitles.isEmpty {
-                    Picker("Inspection title from calendar", selection: $calendarTitle) {
+                    Picker("Report subject", selection: Binding(get: { report.calendar_title ?? "" }, set: chooseCalendarTitle)) {
                         Text("Choose a title…").tag("")
                         ForEach(calendarTitles, id: \.self) { Text($0).tag($0) }
                     }
-                }
-                TextField("Inspection title", text: $inspectionTitle, axis: .vertical)
-                if !calendarTitles.isEmpty {
-                    Button("Use selected title and outcome") { let chosen = calendarTitle; calendarTitle = chosen }.disabled(calendarTitle.isEmpty)
-                }
+                    Button("Use selected title and outcome") { chooseCalendarTitle(report.calendar_title ?? "") }.disabled((report.calendar_title ?? "").isEmpty)
+                } else { Text("Extract calendar content on the inspection page to see matching subjects.").font(.caption).foregroundStyle(.secondary) }
                 if !report.status.isEmpty { Text(report.status == "No OIs" ? "Outcome: No open items" : "Outcome: Open items").font(.caption).foregroundStyle(.secondary) }
             }
             Section {
                 DisclosureGroup("Outcome for custom titles") {
-                    Picker("Result — explicit confirmation", selection: $report.status) {
+                    Picker("Result — explicit confirmation", selection: Binding(get: { report.status }, set: { value in report.calendar_title = nil; report.status = value; if value != "No OIs" { report.stamp_requested = false } })) {
                         Text("Not confirmed").tag("")
                         Text("Open items").tag("OIs")
                         Text("No open items").tag("No OIs")
@@ -310,7 +300,7 @@ struct ReportEditor: View {
                     TextField("Chute model", text: siteBinding("chute_model"))
                 }
             }
-            Section("Open items") {
+            if report.status == "OIs" { Section("Open items") {
                 ForEach($report.open_items) { $finding in
                     HStack(alignment: .top, spacing: 10) {
                         OpenItemTextCell(label: "Location / occurrence", value: $finding.location)
@@ -321,7 +311,14 @@ struct ReportEditor: View {
                 Button("Add open item") { report.open_items.append(Finding()) }
                 Text("Select only actions matching observed deficiencies. Multiple actions stay in this item’s cell; add separate items for different locations. Swipe to remove an item.").font(.caption)
             }
-        }.navigationTitle(report.displayName + " facts")
+            }
+            if report.status == "No OIs" {
+                Section("Signature / stamp") {
+                    Toggle("Apply saved signature/stamp to this report", isOn: Binding(get: { report.stamp_requested ?? false }, set: { report.stamp_requested = $0 }))
+                }
+            }
+        }.onChange(of: report.status) { _, value in if value != "No OIs" { report.stamp_requested = false } }
+        .navigationTitle(report.displayName + " facts")
             .scrollDismissesKeyboard(.interactively)
             .toolbar { ToolbarItemGroup(placement: .keyboard) {
                 Spacer()

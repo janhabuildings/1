@@ -209,7 +209,9 @@ def calendar_candidates(text):
     if not result.get('project'):
         projects={row.get('subject_project') for row in subjects}
         if len(projects)==1 and None not in projects:result['project']=projects.pop()
-    return {'fields':result,'equipment':equipment,'titles':titles,'report_subjects':subjects,'confirmed':False,
+    from backend.inspection_titles import calendar_equipment_labels
+    return {'fields':result,'equipment':equipment,'titles':titles,'report_subjects':subjects,
+            'equipment_labels':calendar_equipment_labels(subjects,equipment),'confirmed':False,
             'notice':'Calendar template alternatives are not inspection results. Confirm all candidates.'}
 
 

@@ -17,6 +17,8 @@ struct ReportDraft: Codable, Equatable, Identifiable {
     var equipment: String
     var displayName: String { equipment == "SF" ? "Scaffold" : equipment == "SH" ? "Shed" : "Other" }
     var status = ""
+    var calendar_title: String?
+    var stamp_requested: Bool?
     var client = ""
     var project = ""
     var subject_project = ""
@@ -44,6 +46,8 @@ struct Inspection: Codable, Equatable, Identifiable {
     }
     var id = UUID().uuidString
     var title = "New inspection"
+    var generated_title: String?
+    var inspection_number: Int?
     var project = ""
     var inspection_date = Self.today()
     var calendar_text = ""
@@ -98,10 +102,61 @@ struct Inspection: Codable, Equatable, Identifiable {
     mutating func confirmCalendarTitle(_ title: String, candidates: CalendarCandidates?) {
         guard let row = candidates?.report_subjects?.first(where: { $0["title"] == title }),
               let index = reports.firstIndex(where: { $0.equipment == row["equipment"] }) else { return }
+        let previous = reports[index].calendar_title ?? ""
+        if let candidates { let snapshot = self; candidates.fill(&reports[index], inspection: snapshot, selectedTitle: title, previousTitle: previous) }
+        reports[index].calendar_title = title
         if title.range(of: #"-\s*(?:No\s+OIs|PE\s+CERT\s+OF\s+USE)\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil { reports[index].status = "No OIs" }
-        else if title.range(of: #"-\s*OIs\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil { reports[index].status = "OIs" }
+        else if title.range(of: #"-\s*OIs\s*$"#, options: [.regularExpression, .caseInsensitive]) != nil { reports[index].status = "OIs"; reports[index].stamp_requested = false }
     }
 }
+extension Inspection {
+    static func equipmentCode(_ name: String) -> String {
+        let value = name.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        switch value.lowercased() {
+        case "sh", "sidewalk shed": return "SH"
+        case "sf", "supported scaffold": return "SF"
+        case "soe", "support of excavation": return "SOE"
+        case "sstab", "structural stability": return "SStab"
+        case "fp", "fall protection": return "FP"
+        default: return value
+        }
+    }
+    var equipmentTitleKey: String {
+        reports.map { $0.equipment + ":" + ($0.site["other_name"] ?? "") + ":" + ($0.site["report_type"] ?? "") }.joined(separator: "|")
+    }
+    mutating func refreshTitle(force: Bool = false) {
+        if !force && !title.isEmpty && title != "New inspection", let generated_title, title != generated_title { return }
+        let candidates = calendar_candidates
+        var labels = candidates?.equipment_labels ?? []
+        if labels.isEmpty {
+            labels = (candidates?.report_subjects ?? candidates?.equipment ?? []).map { row in
+                let kind = row["equipment"] ?? ""
+                return Self.equipmentCode(["SF", "SH"].contains(kind) ? kind : row["other_name"] ?? row["report_type"] ?? "Other")
+            }
+        }
+        for report in reports {
+            if report.equipment != "OT" { labels.append(report.equipment); continue }
+            let name = report.site["other_name"] ?? ""
+            let type = report.site["report_type"] ?? ""
+            if !name.isEmpty { labels.append(Self.equipmentCode(name)) }
+            else if !type.isEmpty && type != "Unknown / custom" { labels.append(Self.equipmentCode(type)) }
+            else if !(candidates?.equipment.contains(where: { $0["equipment"] == "OT" }) ?? false) { labels.append("Other") }
+        }
+        labels = labels.reduce(into: []) { result, item in if !item.isEmpty && !result.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) { result.append(item) } }
+        var parts = [client ?? "", project].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if !labels.isEmpty { parts.append(labels.joined(separator: " ")) }
+        if !parts.isEmpty { title = inspection_date + " " + parts.joined(separator: "-") }
+        else if force || title == "New inspection" || title == generated_title { title = inspection_date + " Inspection " + String(inspection_number ?? 1) }
+        generated_title = title
+    }
+    static func fresh(existing: [Inspection], on date: String = Inspection.today()) -> Inspection {
+        let sameDay = existing.filter { $0.inspection_date == date }
+        let number = max(sameDay.count, sameDay.compactMap(\.inspection_number).max() ?? 0) + 1
+        var value = Inspection(); value.inspection_date = date; value.inspection_number = number
+        value.refreshTitle(force: true); return value
+    }
+}
+
 struct LocalMedia: Codable, Equatable, Identifiable {
     var id = UUID().uuidString
     var inspectionID: String
@@ -180,6 +235,7 @@ struct CalendarCandidates: Codable, Equatable {
     var equipment: [[String: String]]
     var titles: [String]?
     var report_subjects: [[String: String]]?
+    var equipment_labels: [String]?
 
     static func missing(_ value: String?) -> Bool {
         ["", "[pending confirmation]", "pending", "tbd"].contains((value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
@@ -209,7 +265,6 @@ struct CalendarCandidates: Codable, Equatable {
     func apply(to inspection: inout Inspection, selectedTitle: String = "", previousTitle: String = "", applyDates: Bool = false) {
         let previousClient = inspection.client
         inspection.calendar_candidates = self
-        if !selectedTitle.isEmpty { inspection.title = selectedTitle }
         if Self.missing(inspection.project) { inspection.project = fields["project"] ?? "" }
         if let value = fields["inspection_date"], applyDates || Self.missing(inspection.inspection_date) { inspection.inspection_date = value }
         if Self.missing(inspection.client) { inspection.client = fields["client"] }
@@ -220,8 +275,9 @@ struct CalendarCandidates: Codable, Equatable {
             if let kind = item["equipment"], ["SF", "SH", "OT"].contains(kind), !inspection.reports.contains(where: { $0.equipment == kind }) { inspection.reports.append(ReportDraft(equipment: kind)) }
         }
         let snapshot = inspection
-        for index in inspection.reports.indices { fill(&inspection.reports[index], inspection: snapshot, selectedTitle: selectedTitle, previousTitle: previousTitle, applyDates: applyDates) }
+        for index in inspection.reports.indices { fill(&inspection.reports[index], inspection: snapshot, selectedTitle: inspection.reports[index].calendar_title ?? "", applyDates: applyDates) }
         inspection.prepareAttendees(previousClient: previousClient)
+        inspection.refreshTitle(force: true)
     }
 }
 

@@ -36,6 +36,8 @@ class FindingInput(BaseModel):
 
 class ReportInput(BaseModel):
     equipment: Literal['SF','SH','OT']
+    calendar_title: str = Field(default='',max_length=1000)
+    stamp_requested: bool = False
     status: Literal['','OIs','No OIs'] = ''
     client: str = ''
     project: str = ''
@@ -60,7 +62,9 @@ class ReportInput(BaseModel):
 class InspectionInput(BaseModel):
     attendees_initialized: bool = False
     attendees: list[AttendeeInput] = Field(default_factory=list,max_length=50)
-    title: str = Field(min_length=1,max_length=200)
+    title: str = Field(min_length=1,max_length=1000)
+    generated_title: str | None = Field(default=None,max_length=1000)
+    inspection_number: int | None = Field(default=None,ge=1)
     project: str = Field(default='',max_length=200)
     inspection_date: date
     client: str = Field(default='',max_length=1000)
@@ -138,6 +142,7 @@ class ExportInput(BaseModel):
     mailbox_email: str = Field(default='',max_length=254)
     stamp_id: str | None = None
     stamp_reviewed: bool = False
+    stamp_equipment: list[Literal['SF','SH','OT']] | None = None
     recipients_confirmed: bool = False
     to: list[str] = Field(default_factory=list)
     cc: list[str] = Field(default_factory=list)
@@ -223,6 +228,7 @@ def create_app(settings=None):
         payload=json.loads(data.model_dump_json());payload['id']=uid()
         if 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
         for report in payload['reports']:
+            if report['status']!='No OIs':report['stamp_requested']=False
             if not report['attendees_override']:report['attendees']=payload['attendees']
         return store.save(payload)
 
@@ -243,9 +249,16 @@ def create_app(settings=None):
             previous=db.execute('SELECT payload FROM inspections WHERE id=?',(identity,)).fetchone()
             if previous:
                 old=json.loads(previous['payload'])
+                if 'report_versions' in old:payload['report_versions']=old['report_versions']
                 if 'attendees_initialized' not in data.model_fields_set:payload['attendees_initialized']=old.get('attendees_initialized',False)
+                if 'generated_title' not in data.model_fields_set:payload['generated_title']=old.get('generated_title')
+                if 'inspection_number' not in data.model_fields_set:payload['inspection_number']=old.get('inspection_number')
                 old_reports={report['equipment']:report for report in old.get('reports',[])}
                 for incoming,report in zip(data.reports,payload['reports']):
+                    previous_report=old_reports.get(report['equipment'],{})
+                    for key in ('calendar_title','stamp_requested'):
+                        if key not in incoming.model_fields_set:report[key]=previous_report.get(key,report[key])
+                    if report['status']!='No OIs':report['stamp_requested']=False
                     if 'attendees_override' not in incoming.model_fields_set and old_reports.get(report['equipment'],{}).get('attendees_override'):
                         report['attendees_override']=True
                 for key in ('client','request_date','requested_by','address','subject_project'):
@@ -256,6 +269,7 @@ def create_app(settings=None):
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
             if not previous and 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
             for report in payload['reports']:
+                if report['status']!='No OIs':report['stamp_requested']=False
                 if not report['attendees_override']:report['attendees']=payload['attendees']
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
             for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
@@ -444,10 +458,11 @@ def create_app(settings=None):
         request={'mailbox':{'account':data.mailbox_email.strip() or 'janhabuildings@gmail.com','to':data.to,'cc':data.cc,
                             'recipients_confirmed':data.recipients_confirmed},'reports':entries}
         stamp=None
-        if data.stamp_id and any(r['status']=='No OIs' for r in entries):
+        stamp_entries=[r for r in entries if r['status']=='No OIs' and (data.stamp_equipment is None or r['equipment'] in data.stamp_equipment)]
+        if data.stamp_id and stamp_entries:
             if not data.stamp_reviewed: raise HTTPException(422,'Confirm you reviewed the No OIs report and authorize applying your stored stamp image')
             try:
-                stamp=signatures.get(store,data.stamp_id);signatures.validate_owner(stamp,entries)
+                stamp=signatures.get(store,data.stamp_id);signatures.validate_owner(stamp,stamp_entries)
             except ValueError as error: raise HTTPException(422,str(error))
         with store.connect() as db:db.execute('INSERT INTO report_runs VALUES (?,?,?)',(output.name,identity,str(output)))
         def work():
@@ -456,7 +471,8 @@ def create_app(settings=None):
                 import os
                 os.environ['DSENY_OFFICE_BIN']=settings.office_bin
             return runner.generate(request,output,templates=selected,pdf_postprocess=(lambda pdf,report:signatures.apply(pdf,stamp)) if stamp else None,
-                                   docx_postprocess=(lambda docx,report:signatures.apply_docx(docx,stamp)) if stamp else None)
+                                   docx_postprocess=(lambda docx,report:signatures.apply_docx(docx,stamp)) if stamp else None,
+                                   postprocess_equipment=[r['equipment'] for r in stamp_entries])
         try: manifest=await asyncio.to_thread(work)
         except (ValueError,KeyError,TypeError,IndexError) as error: raise HTTPException(422,str(error))
         if identity and identity in lifecycle.deletions(store)['inspections']:
@@ -480,6 +496,15 @@ def create_app(settings=None):
                     else:
                         db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?)',(artifact,identity,path.name,types[path.suffix],str(path)))
                     artifacts.append({'id':artifact,'filename':path.name,'mime':types[path.suffix],'equipment':path.parent.name,'generation_id':output.name})
+                if identity:
+                    current=db.execute('SELECT payload FROM inspections WHERE id=?',(identity,)).fetchone()
+                    if current:
+                        record=json.loads(current['payload']);versions=record.setdefault('report_versions',{})
+                        for report in entries:
+                            versions[report['equipment']]={'generation_id':output.name,'status':report['status'],
+                                'calendar_title':report.get('calendar_title',''),'stamp_requested':report.get('stamp_requested',False),
+                                'track_stamp':data.stamp_equipment is not None}
+                        db.execute('UPDATE inspections SET payload=? WHERE id=?',(json.dumps(record),identity))
         if removed_during_generation:
             import shutil
             if output.is_dir(): shutil.rmtree(output)

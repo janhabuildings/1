@@ -55,7 +55,7 @@ struct InspectionList: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gear") { settings = true } }
-                ToolbarItem(placement: .topBarTrailing) { Button("New inspection", systemImage: "plus") { store.save(Inspection()) } }
+                ToolbarItem(placement: .topBarTrailing) { Button("New inspection", systemImage: "plus") { store.save(Inspection.fresh(existing: store.cache.inspections)) } }
                 ToolbarItem(placement: .bottomBar) {
                     Button(syncing ? "Refreshing…" : "Sync / refresh inspections", systemImage: "arrow.clockwise") {
                         Task { syncing = true; defer { syncing = false }; do { try await store.syncAll() } catch { store.error = error.localizedDescription } }
@@ -147,7 +147,6 @@ struct InspectionDetail: View {
     @State private var suggestedFindings: [SuggestedFinding] = []
     @State private var analysisChecks: [String] = []
     @State private var calendarCandidates: CalendarCandidates?
-    @State private var selectedCalendarTitle = ""
     @State private var calendarStatus = ""
     @State private var export: ExportResult?
     @State private var share: SharedItems?
@@ -159,7 +158,6 @@ struct InspectionDetail: View {
     @State private var removeMediaID: String?
     @State private var removeReportType: String?
     @State private var removeArtifactID: String?
-    @State private var applyStamp = false
     @State private var stampConsent = false
     @State private var deleteThisInspection = false
     @Environment(\.dismiss) private var closeInspection
@@ -235,15 +233,21 @@ struct InspectionDetail: View {
         }
         .navigationTitle(inspection.project.isEmpty ? "Inspection" : inspection.project)
         .navigationDestination(for: ReportRoute.self) { route in
-            ReportFactsEditor(reports: $inspection.reports, project: inspection.project, inspectionDate: inspection.inspection_date, initialEquipment: route.equipment, inspectionTitle: $inspection.title, calendarTitle: Binding(get: { selectedCalendarTitle }, set: { title in
-                let previous = selectedCalendarTitle; selectedCalendarTitle = title
-                if !title.isEmpty {
-                    applyCalendar(previousTitle: previous)
-                    inspection.confirmCalendarTitle(title, candidates: calendarCandidates ?? inspection.calendar_candidates)
-                }
-            }), calendarTitles: calendarCandidates?.titles ?? inspection.calendar_candidates?.titles ?? [], calendarSubjects: calendarCandidates?.report_subjects ?? inspection.calendar_candidates?.report_subjects ?? [], attendees: inspection.sharedAttendees, attendeeClient: inspection.client ?? "")
+            ReportFactsEditor(inspection: $inspection, candidates: calendarCandidates ?? inspection.calendar_candidates, initialEquipment: route.equipment)
         }
         .onChange(of: inspection) { _, value in store.save(value); scheduleSync() }
+        .onChange(of: inspection.project) { _, _ in inspection.refreshTitle() }
+        .onChange(of: inspection.client) { _, _ in inspection.refreshTitle() }
+        .onChange(of: inspection.inspection_date) { _, _ in inspection.refreshTitle() }
+        .onChange(of: inspection.equipmentTitleKey) { _, _ in inspection.refreshTitle() }
+        .onChange(of: inspection.reports.map { $0.equipment + "|" + $0.status + "|" + ($0.calendar_title ?? "") + "|" + String($0.stamp_requested ?? false) }) { old, new in
+            let changed = Set(new.filter { !old.contains($0) }.map { String($0.split(separator: "|")[0]) })
+            if var files = export {
+                files.artifacts.removeAll { changed.contains($0.equipment) }
+                files.reports.removeAll { row in if case let .string(equipment)? = row["equipment"] { return changed.contains(equipment) }; return false }
+                export = files
+            }
+        }
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
         .onDisappear { finishRecording() }
         .onChange(of: photoSelection) { _, items in
@@ -260,8 +264,8 @@ struct InspectionDetail: View {
         }
         .task {
             inspection.prepareAttendees()
+            if inspection.generated_title == nil { inspection.generated_title = inspection.title }
             calendarCandidates = inspection.calendar_candidates
-            if let candidates = calendarCandidates, candidates.titles?.contains(inspection.title) == true { selectedCalendarTitle = inspection.title }
             if store.connected {
                 do { export = try JSONDecoder().decode(ExportResult.self, from: await store.api.request("/inspections/\(inspection.id)/artifacts")) } catch { }
             }
@@ -349,6 +353,7 @@ struct InspectionDetail: View {
     }
     private var basics: some View {
         Section("Inspection") {
+            TextField("Inspection title", text: $inspection.title, axis: .vertical)
             TextField("Project", text: $inspection.project)
             if let project = calendarCandidates?.fields["project"], !project.isEmpty, project != inspection.project {
                 Button("Use calendar project: " + project) {
@@ -494,10 +499,9 @@ struct InspectionDetail: View {
         Section("Review and prepare") {
             Button("Sync this inspection", systemImage: "arrow.triangle.2.circlepath") { sync() }.disabled(busy)
             Button("Suggest findings from notes/photos", systemImage: "sparkles") { aiConsent = true }.disabled(busy)
-            if inspection.reports.contains(where: { $0.status == "No OIs" }) {
-                Toggle("Apply saved signature/stamp to No OIs PDF", isOn: $applyStamp)
-            }
-            Button("Generate review reports", systemImage: "doc.richtext") { if applyStamp && inspection.reports.contains(where: { $0.status == "No OIs" }) { stampConsent = true } else { generate() } }.disabled(busy)
+            Button("Generate review reports", systemImage: "doc.richtext") {
+                if inspection.reports.contains(where: { $0.status == "No OIs" && $0.stamp_requested == true }) { stampConsent = true } else { generate() }
+            }.disabled(busy)
             Button("Share notes to WhatsApp or another app", systemImage: "square.and.arrow.up") {
                 share = SharedItems(items: ["\(inspection.project) · \(inspection.inspection_date)\n\(inspection.notes)"])
             }
@@ -547,8 +551,9 @@ struct InspectionDetail: View {
         report.project = inspection.project; report.inspection_date = inspection.inspection_date
         report.attendees = inspection.sharedAttendees
         let candidates = calendarCandidates ?? inspection.calendar_candidates ?? CalendarCandidates(fields: [:], equipment: [])
-        candidates.fill(&report, inspection: inspection, selectedTitle: selectedCalendarTitle)
+        candidates.fill(&report, inspection: inspection, selectedTitle: "")
         inspection.reports.append(report)
+        inspection.refreshTitle(force: true)
     }
     private var photoNotes: some View {
         NavigationStack {
@@ -672,8 +677,6 @@ struct InspectionDetail: View {
                 let data = try await store.api.json("/calendar/extract", object: ["text": inspection.calendar_text])
                 calendarCandidates = try JSONDecoder().decode(CalendarCandidates.self, from: data)
                 calendarExpanded = false
-                let titles = calendarCandidates?.titles ?? []
-                selectedCalendarTitle = titles.contains(inspection.title) ? inspection.title : (titles.count == 1 ? titles[0] : "")
                 // No outcome or drawing approval is inferred.
                 let object = try JSONSerialization.jsonObject(with: data)
                 let pretty = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
@@ -696,7 +699,7 @@ struct InspectionDetail: View {
     }
     private func applyCalendar(applyDates: Bool = false, previousTitle: String = "") {
         guard let candidates = calendarCandidates ?? inspection.calendar_candidates else { return }
-        candidates.apply(to: &inspection, selectedTitle: selectedCalendarTitle, previousTitle: previousTitle, applyDates: applyDates)
+        candidates.apply(to: &inspection, applyDates: applyDates)
         store.save(inspection)
         scheduleSync()
     }
@@ -720,6 +723,8 @@ struct InspectionDetail: View {
     private func adopt(_ finding: SuggestedFinding) {
         if !inspection.reports.contains(where: { $0.equipment == finding.equipment }) { addReport(finding.equipment) }
         guard let index = inspection.reports.firstIndex(where: { $0.equipment == finding.equipment }) else { return }
+        inspection.reports[index].calendar_title = nil
+        inspection.reports[index].stamp_requested = false
         inspection.reports[index].status = "OIs"
         inspection.reports[index].open_items.append(Finding(location: finding.location, action: finding.suggested_action))
         if let photo = finding.photo_id { inspection.reports[index].photo_references.append(photo) }
@@ -752,6 +757,7 @@ struct InspectionDetail: View {
                     let encoded = owner.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=?#"))) ?? ""
                     let stamp = try JSONDecoder().decode(StampAsset.self, from: await store.api.request("/signing-assets?owner=\(encoded)", method: "POST", body: Data(contentsOf: path), mime: "image/png"))
                     options["stamp_id"] = stamp.id; options["stamp_reviewed"] = true
+                    options["stamp_equipment"] = inspection.reports.filter { $0.status == "No OIs" && $0.stamp_requested == true }.map(\.equipment)
                 }
                 let data = try await store.api.json("/inspections/\(inspection.id)/reports", object: options)
                 export = try JSONDecoder().decode(ExportResult.self, from: data)
