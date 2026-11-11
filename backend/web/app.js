@@ -92,7 +92,7 @@ function correctiveActionField(value,change,options){
   return root;
 }
 
-function reset(){clearTimeout(saveTimer);editRevision++;state.saveConflict=false;closePreview();state.id=null;state.reports=[];state.activeReport=null;state.attendees=[];state.media=[];state.candidates=null;state.calendarFilled=new WeakMap();state.urls.forEach(URL.revokeObjectURL);state.urls=[];common.forEach(k=>$(k).value='');$('calendar-content').open=false;$('capture-location').value='';$('capture-condition').value='';$('inspection_date').value=today();$('generated').replaceChildren();$('suggestions').replaceChildren();$('calendar-candidates').hidden=true;renderAttendees();renderReports();renderMedia();state.dirty=false;$('save-state').textContent='New inspection · not saved';$('saved').value='';tab('inspection');}
+function reset(){clearTimeout(saveTimer);editRevision++;state.saveConflict=false;closePreview();state.id=null;state.reports=[];state.activeReport=null;state.attendees=defaultAttendees('');state.media=[];state.candidates=null;state.calendarFilled=new WeakMap();state.urls.forEach(URL.revokeObjectURL);state.urls=[];common.forEach(k=>$(k).value='');$('calendar-content').open=false;$('capture-location').value='';$('capture-condition').value='';for(const id of ['capture-name','capture-company','capture-role','capture-attendee'])$(id).value='';$('inspection_date').value=today();$('generated').replaceChildren();$('suggestions').replaceChildren();$('calendar-candidates').hidden=true;renderAttendees();renderReports();renderMedia();state.dirty=false;$('save-state').textContent='New inspection · not saved';$('saved').value='';tab('inspection');}
 function addReport(equipment,activate=false){
   if(!state.reports.some(r=>r.equipment===equipment)){
     state.reports.push({equipment,status:'',permit:'',inspection_code:'',locations:'',drawings_on_site:'',drawings_approved:'',site:{},open_items:[],source_references:[],photo_references:[]});markDirty();
@@ -110,12 +110,23 @@ function switchReport(equipment){
 }
 const attendeeRoles=['Competent Person/Site Supervisor','Safety Inspector','Competent Person/ Equipment Installation Supervisor','Competent Person','GC’s Project Manager','CM’s Representative','Owner’s Representative','PE'];
 const attendeeCompanies=['NYC SCA','DSENY Engineering Services PC'];
+function defaultAttendees(client){return [
+  {id:crypto.randomUUID(),name:'',company:client||'',title:attendeeRoles[0]},
+  {id:crypto.randomUUID(),name:'',company:attendeeCompanies[0],title:attendeeRoles[1]},
+  {id:crypto.randomUUID(),name:'Kamruz Zaman',company:attendeeCompanies[1],title:'PE'}
+];}
+function insertAttendee(person){const last=state.attendees.at(-1);const index=last?.company===attendeeCompanies[1]&&last?.title==='PE'?state.attendees.length-1:state.attendees.length;state.attendees.splice(index,0,person);}
+function confirmCalendarTitle(title){const selected=state.candidates?.report_subjects?.find(row=>row.title===title);const report=state.reports.find(r=>r.equipment===selected?.equipment);if(!report)return;if(/-\s*(?:No\s+OIs|PE\s+CERT\s+OF\s+USE)\s*$/i.test(title))report.status='No OIs';else if(/-\s*OIs\s*$/i.test(title))report.status='OIs';renderReports();markDirty();}
 function renderAttendees(){
+  const picker=$('capture-attendee'),selected=picker.value;picker.replaceChildren(el('option','No attendee / new person'));picker.firstChild.value='';
+  for(const person of state.attendees){const option=el('option',person.name||person.company+' · '+person.title);option.value=person.id;picker.append(option);}picker.value=selected;
+  $('capture-companies').replaceChildren(...[...new Set([...attendeeCompanies,$('client').value].filter(Boolean))].map(value=>{const option=el('option');option.value=value;return option;}));
+  if($('capture-role').options.length===1)for(const role of attendeeRoles){const option=el('option',role);option.value=role;$('capture-role').append(option);}
   const root=$('attendees');root.replaceChildren();if(!state.attendees.length)root.append(el('p','No attendees entered. Add the people who actually attended.','empty'));
   state.attendees.forEach((a,i)=>{
     const row=el('div',undefined,'row attendee-row');
     const name=field('Name',a.name,v=>a.name=v);name.classList.add('attendee-name');name.querySelector('input').placeholder='Name';row.append(name);
-    row.append(siteChoice('Company / agency',a.company,v=>a.company=v,attendeeCompanies),siteChoice('Role',a.title,v=>a.title=v,attendeeRoles));
+    row.append(siteChoice('Company / agency',a.company,v=>a.company=v,[...new Set([...attendeeCompanies,$('client').value].filter(Boolean))]),siteChoice('Role',a.title,v=>a.title=v,attendeeRoles));
     const remove=removeButton('Remove attendee');remove.onclick=()=>{state.attendees.splice(i,1);renderAttendees();markDirty();};row.append(remove);root.append(row);
   });
 }
@@ -124,7 +135,7 @@ function renderReports(){const root=$('report-list');root.replaceChildren();
   for(const equipment of ['SF','SH','OT']){const button=$('add-'+equipment);button.setAttribute('aria-selected',String(state.activeReport===equipment));button.classList.toggle('selected',state.activeReport===equipment);}
 if(!state.reports.length)root.append(el('p','Add a scaffold, shed or Other report to begin.','empty'));state.reports.forEach((r,index)=>{
   const card=el('article',undefined,'report-card');card.id='report-'+r.equipment;card.setAttribute('role','tabpanel');card.setAttribute('aria-labelledby','add-'+r.equipment);card.hidden=r.equipment!==state.activeReport;const heading=el('div',undefined,'section-heading');heading.append(el('h3',equipmentLabel(r.equipment)));const remove=removeButton('Remove report');remove.onclick=()=>{if(confirm('Remove this report from the draft?')){state.reports.splice(index,1);renderReports();markDirty();}};heading.append(remove);card.append(heading);
-  card.append(field('Inspection result',r.status,v=>r.status=v,{options:[['','Not confirmed'],['OIs','Open items'],['No OIs','No open items']]}));
+  card.append(field('Outcome for custom title',r.status,v=>r.status=v,{options:[['','Not confirmed'],['OIs','Open items'],['No OIs','No open items']]}));
   const grid=el('div',undefined,'grid');[['permit','Permit number'],['inspection_code','Inspection number · VII / VIII'],['locations','Actually inspected locations / extents']].forEach(([k,l])=>grid.append(field(l,r[k],v=>r[k]=v)));
   ['drawings_on_site','drawings_approved'].forEach((k,i)=>grid.append(field(i?'Drawings DOB/SCA approved?':'PE drawings on site?',r[k],v=>r[k]=v,{options:[['','Not confirmed'],['Yes','Yes'],['No','No'],['NA','NA']]})));
   r.site=r.site||{};
@@ -157,8 +168,8 @@ async function save(){
 }
 
 async function refreshList(){const records=await json('/inspections');const select=$('saved');select.replaceChildren(el('option','Choose an inspection…'));records.forEach(r=>{const option=el('option',`${r.title||r.project||'Inspection'} · ${r.inspection_date}`);option.value=r.id;select.append(option);});select.value=state.id||'';}
-async function load(id){const record=await json(`/inspections/${encodeURIComponent(id)}`);reset();state.id=id;['title','project','inspection_date','calendar_text','notes','transcript'].forEach(k=>$(k).value=record[k]||'');state.reports=record.reports||[];const first=state.reports[0]||{};['client','request_date','requested_by','address','subject_project'].forEach(k=>$(k).value=record[k]||first[k]||'');state.attendees=record.attendees?.length?record.attendees:(first.attendees||[]);if(record.calendar_candidates){showCalendarCandidates(record.calendar_candidates,false);const before=JSON.stringify(payload());applyCalendar(false,false);state.dirty=before!==JSON.stringify(payload());}state.media=await json(`/inspections/${encodeURIComponent(id)}/media`);renderAttendees();renderReports();await renderMedia();showGenerated(await json(`/inspections/${encodeURIComponent(id)}/artifacts`));$('saved').value=id;$('save-state').textContent=state.dirty?'Calendar facts restored · review and save':'Loaded saved inspection';if(state.dirty)markDirty();}
-async function renderMedia(){const root=$('media-list');root.replaceChildren();$('media-empty').hidden=state.media.length>0;state.urls.forEach(URL.revokeObjectURL);state.urls=[];for(const m of state.media){const card=el('article',undefined,'media-card');card.append(el('p',m.filename,'media-title'));if(m.kind==='photo'){const choose=el('label',undefined,'check');const checkbox=el('input');checkbox.type='checkbox';checkbox.dataset.photoId=m.id;choose.append(checkbox,document.createTextNode('Include in AI analysis'));card.append(choose);}const display=el(m.kind==='photo'?'img':'audio');if(m.kind==='photo')display.alt=m.note||'Inspection photo';else display.controls=true;card.append(display);card.append(field('Equipment',m.equipment,v=>m.equipment=v,{options:[['','Not assigned'],['SF','Scaffold'],['SH','Shed'],['OT','Other']]}),field('Location / observation',m.note,v=>m.note=v,{type:'textarea'}));const saveLabel=el('button','Save evidence label','secondary');saveLabel.onclick=()=>action(async()=>{await json(`/media/${encodeURIComponent(m.id)}`,{method:'PUT',json:{note:m.note||'',equipment:m.equipment||''}});toast('Evidence label saved.');});card.append(saveLabel);const remove=el('button','Delete evidence','danger');remove.onclick=()=>action(async()=>{if(!confirm('Delete this evidence from the inspection?'))return;await json(`/media/${m.id}`,{method:'DELETE'});state.media=state.media.filter(item=>item.id!==m.id);for(const report of state.reports)report.photo_references=(report.photo_references||[]).filter(id=>id!==m.id);await renderMedia();});card.append(remove);root.append(card);try{const response=await api(`/media/${encodeURIComponent(m.id)}`);const url=URL.createObjectURL(await response.blob());state.urls.push(url);if(card.isConnected)display.src=url;else URL.revokeObjectURL(url);}catch(e){card.append(el('p',e.message,'muted'));}}}
+async function load(id){const record=await json(`/inspections/${encodeURIComponent(id)}`);reset();state.id=id;['title','project','inspection_date','calendar_text','notes','transcript'].forEach(k=>$(k).value=record[k]||'');state.reports=record.reports||[];const first=state.reports[0]||{};['client','request_date','requested_by','address','subject_project'].forEach(k=>$(k).value=record[k]||first[k]||'');state.attendees=Array.isArray(record.attendees)?record.attendees:(first.attendees?.length?first.attendees:defaultAttendees($('client').value));if(record.calendar_candidates){showCalendarCandidates(record.calendar_candidates,false);const before=JSON.stringify(payload());applyCalendar(false,false);state.dirty=before!==JSON.stringify(payload());}state.media=await json(`/inspections/${encodeURIComponent(id)}/media`);renderAttendees();renderReports();await renderMedia();showGenerated(await json(`/inspections/${encodeURIComponent(id)}/artifacts`));$('saved').value=id;$('save-state').textContent=state.dirty?'Calendar facts restored · review and save':'Loaded saved inspection';if(state.dirty)markDirty();}
+async function renderMedia(){const root=$('media-list');root.replaceChildren();$('media-empty').hidden=state.media.length>0;state.urls.forEach(URL.revokeObjectURL);state.urls=[];for(const m of state.media){const card=el('article',undefined,'media-card');card.append(el('p',m.filename,'media-title'));if(m.kind==='photo'){const choose=el('label',undefined,'check');const checkbox=el('input');checkbox.type='checkbox';checkbox.dataset.photoId=m.id;choose.append(checkbox,document.createTextNode('Include in AI analysis'));card.append(choose);}const display=el(m.kind==='photo'?'img':m.kind==='video'?'video':'audio');if(m.kind==='photo')display.alt=m.note||'Inspection photo';else display.controls=true;card.append(display);card.append(field('Equipment',m.equipment,v=>m.equipment=v,{options:[['','Not assigned'],['SF','Scaffold'],['SH','Shed'],['OT','Other']]}),field('Location / observation',m.note,v=>m.note=v,{type:'textarea'}));const saveLabel=el('button','Save evidence label','secondary');saveLabel.onclick=()=>action(async()=>{await json(`/media/${encodeURIComponent(m.id)}`,{method:'PUT',json:{note:m.note||'',equipment:m.equipment||''}});toast('Evidence label saved.');});card.append(saveLabel);const remove=el('button','Delete evidence','danger');remove.onclick=()=>action(async()=>{if(!confirm('Delete this evidence from the inspection?'))return;await json(`/media/${m.id}`,{method:'DELETE'});state.media=state.media.filter(item=>item.id!==m.id);for(const report of state.reports)report.photo_references=(report.photo_references||[]).filter(id=>id!==m.id);await renderMedia();});card.append(remove);root.append(card);try{const response=await api(`/media/${encodeURIComponent(m.id)}`);const url=URL.createObjectURL(await response.blob());state.urls.push(url);if(card.isConnected)display.src=url;else URL.revokeObjectURL(url);}catch(e){card.append(el('p',e.message,'muted'));}}}
 const calendarFieldMissing = value => ['','[pending confirmation]','pending','tbd'].includes((value||'').trim().toLowerCase());
 function hydrateCalendarReport(report){
   if(!report||!state.candidates)return;
@@ -174,7 +185,7 @@ function hydrateCalendarReport(report){
   state.calendarFilled.set(report,filled);
 }
 function applyCalendar(applyDates=false,createReports=true){
-  const c=state.candidates;if(!c)return;
+  const c=state.candidates;if(!c)return;const previousClient=$('client').value;
   if($('calendar-title').value)$('title').value=$('calendar-title').value;
   const fields=c.fields||{};
   for(const key of ['client','project','requested_by','address'])if(fields[key]&&calendarFieldMissing($(key).value))$(key).value=fields[key];
@@ -187,6 +198,7 @@ function applyCalendar(applyDates=false,createReports=true){
     }
     for(const candidate of candidates){if(['SF','SH','OT'].includes(candidate.equipment))addReport(candidate.equipment);}
   }
+  const firstPerson=state.attendees[0];if(firstPerson&&firstPerson.title===attendeeRoles[0]&&(!firstPerson.company||firstPerson.company===previousClient))firstPerson.company=$('client').value;renderAttendees();
   for(const report of state.reports)hydrateCalendarReport(report);
   const selected=(c.report_subjects||[]).find(row=>row.title===$('calendar-title').value);
   if(selected&&state.reports.some(r=>r.equipment===selected.equipment))state.activeReport=selected.equipment;
@@ -211,7 +223,7 @@ $('new').onclick=()=>action(async()=>{if(state.dirty)await save();reset();});
 $('save').onclick=()=>action(async()=>{await save();toast('Inspection saved to the server.');});
 $('refresh').onclick=()=>action(async()=>{const id=state.id;if(state.saveConflict){if(!confirm('Discard the conflicting local draft and load saved records? Download Backup inspection JSON first if you need this draft.'))return;state.saveConflict=false;await refreshList();if(id)await load(id);}else{await refreshList();if(id&&!state.dirty)await load(id);}toast('Refreshed from backend.');});
 $('saved').onchange=()=>{const id=$('saved').value;if(id)action(async()=>{if(state.dirty)await save();await load(id);});};
-$('add-attendee').onclick=()=>{state.attendees.push({id:crypto.randomUUID(),name:'',company:'',title:''});renderAttendees();markDirty();};['SF','SH','OT'].forEach(eq=>$(`add-${eq}`).onclick=()=>{document.activeElement?.blur();switchReport(eq);$('report-list').closest('.panel')?.scrollIntoView({block:'start',behavior:'auto'});});
+$('add-attendee').onclick=()=>{insertAttendee({id:crypto.randomUUID(),name:'',company:'',title:''});renderAttendees();markDirty();};['SF','SH','OT'].forEach(eq=>$(`add-${eq}`).onclick=()=>{document.activeElement?.blur();switchReport(eq);$('report-list').closest('.panel')?.scrollIntoView({block:'start',behavior:'auto'});});
 function showCalendarCandidates(candidates,chooseSingle=true){
   state.candidates=candidates;const titles=candidates.titles||[],select=$('calendar-title');select.replaceChildren();
   const blank=el('option','Choose a title…');blank.value='';select.append(blank);
@@ -228,15 +240,19 @@ $('transcript-file').onchange=()=>action(async()=>{const file=$('transcript-file
 $('upload').onchange=()=>action(async()=>{
   const files=[...$('upload').files];if(!files.length)return;
   const location=$('capture-location').value.trim(),condition=$('capture-condition').value.trim();
-  const photoNote=[location?'Location: '+location:'',condition?'Condition: '+condition:''].filter(Boolean).join('\n');
-  const prepared=files.map(file=>{if(file.size>40*1024*1024)throw new Error(`${file.name}: maximum file size is 40 MB.`);const ext=file.name.split('.').pop().toLowerCase();const mime={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',m4a:'audio/mp4',wav:'audio/wav',mp3:'audio/mpeg'}[ext];if(!mime)throw new Error(`${file.name}: unsupported file type.`);return {file,mime};});
+  const person={id:$('capture-attendee').value||crypto.randomUUID(),name:$('capture-name').value.trim(),company:$('capture-company').value.trim(),title:$('capture-role').value};
+  const photoNote=[location?'Location: '+location:'',condition?'Condition: '+condition:'',person.name?'Attendee: '+person.name:'',person.company?'Company: '+person.company:'',person.title?'Role: '+person.title:''].filter(Boolean).join('\n');
+  const prepared=files.map(file=>{if(file.size>40*1024*1024)throw new Error(`${file.name}: maximum file size is 40 MB.`);const ext=file.name.split('.').pop().toLowerCase();const mime={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',m4a:'audio/mp4',wav:'audio/wav',mp3:'audio/mpeg',mov:'video/quicktime',mp4:'video/mp4'}[ext];if(!mime)throw new Error(`${file.name}: unsupported file type.`);return {file,mime};});
+  if(prepared.some(row=>/^(image|video)\//.test(row.mime))&&(person.name||person.company||person.title)){
+    const existing=state.attendees.find(row=>row.id===person.id);if(existing)Object.assign(existing,person);else if(!state.attendees.some(row=>row.name===person.name&&row.company===person.company&&row.title===person.title))insertAttendee(person);renderAttendees();markDirty();
+  }
   await save();
   try{for(const {file,mime} of prepared){
-    const media=await json(`/inspections/${encodeURIComponent(state.id)}/media?kind=${mime.startsWith('image/')?'photo':'audio'}&filename=${encodeURIComponent(file.name)}`,{method:'POST',body:file,mime,headers:{'X-Asset-ID':crypto.randomUUID()}});
-    if(mime.startsWith('image/')&&photoNote)await json(`/media/${encodeURIComponent(media.id)}`,{method:'PUT',json:{note:photoNote,equipment:''}});
+    const media=await json(`/inspections/${encodeURIComponent(state.id)}/media?kind=${mime.startsWith('image/')?'photo':mime.startsWith('video/')?'video':'audio'}&filename=${encodeURIComponent(file.name)}`,{method:'POST',body:file,mime,headers:{'X-Asset-ID':crypto.randomUUID()}});
+    if(/^(image|video)\//.test(mime)&&photoNote)await json(`/media/${encodeURIComponent(media.id)}`,{method:'PUT',json:{note:photoNote,equipment:''}});
   }}
   finally{state.media=await json(`/inspections/${encodeURIComponent(state.id)}/media`);await renderMedia();$('upload').value='';}
-  $('capture-location').value='';$('capture-condition').value='';
+  $('capture-location').value='';$('capture-condition').value='';for(const id of ['capture-name','capture-company','capture-role','capture-attendee'])$(id).value='';
   toast('Evidence uploaded. Photo notes saved; labels remain editable.');
 });
 $('analyze').onclick=()=>action(async()=>{if(!$('ai-consent').checked)throw new Error('Confirm data-sharing consent before using AI analysis.');const ids=[...document.querySelectorAll('[data-photo-id]:checked')].map(n=>n.dataset.photoId);if(ids.length>6)throw new Error('Select at most six photos for analysis.');await save();showSuggestions(await json(`/inspections/${encodeURIComponent(state.id)}/analyze`,{method:'POST',json:{consent:true,media_ids:ids}}));});
@@ -288,5 +304,7 @@ $('stamp-delete').onclick=()=>action(async()=>{const id=$('stamp-selected').valu
 
 ['SF','SH','OT'].forEach(eq=>$('create-'+eq).onclick=()=>{addReport(eq,true);$('report-list').closest('.panel')?.scrollIntoView({block:'start',behavior:'auto'});});
 document.querySelectorAll('.report-type-tabs [role=tab]').forEach((button,index)=>{button.onkeydown=event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const buttons=[...document.querySelectorAll('.report-type-tabs [role=tab]')];const target=event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowRight'?1:-1)+buttons.length)%buttons.length;buttons[target].click();buttons[target].focus();};});
-$('calendar-title').onchange=()=>{const title=$('calendar-title').value;$('use-calendar-title').disabled=!title;if(title){$('title').value=title;applyCalendar(false);}};
-$('use-calendar-title').onclick=()=>{const title=$('calendar-title').value;if(!title)return;$('title').value=title;applyCalendar(false);toast('Inspection title updated. Confirm report outcomes separately.');};
+$('calendar-title').onchange=()=>{const title=$('calendar-title').value;$('use-calendar-title').disabled=!title;if(title){$('title').value=title;applyCalendar(false);confirmCalendarTitle(title);}};
+$('use-calendar-title').onclick=()=>{const title=$('calendar-title').value;if(!title)return;$('title').value=title;applyCalendar(false);confirmCalendarTitle(title);toast('Inspection title and report outcome updated.');};
+
+$('capture-attendee').onchange=()=>{const person=state.attendees.find(row=>row.id===$('capture-attendee').value);$('capture-name').value=person?.name||'';$('capture-company').value=person?.company||'';$('capture-role').value=person?.title||'';};
