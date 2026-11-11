@@ -211,6 +211,7 @@ def create_app(settings=None):
     def create_inspection(data:InspectionInput):
         payload=json.loads(data.model_dump_json());payload['id']=uid()
         if 'attendees' not in data.model_fields_set and payload['reports']:payload['attendees']=payload['reports'][0]['attendees']
+        for report in payload['reports']:report['attendees']=payload['attendees']
         return store.save(payload)
 
     @app.get('/inspections/{identity}',dependencies=[Depends(authorized)])
@@ -236,6 +237,7 @@ def create_app(settings=None):
                     payload['attendees']=payload['reports'][0]['attendees'] if payload['reports'] else old.get('attendees',[])
             if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
+            for report in payload['reports']:report['attendees']=payload['attendees']
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
             for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
             db.execute('INSERT INTO inspections VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(identity,json.dumps(payload)))
@@ -253,13 +255,14 @@ def create_app(settings=None):
         store.get(identity);return store.media(identity)
 
     @app.post('/inspections/{identity}/media',status_code=201,dependencies=[Depends(authorized)])
-    async def upload(identity:str,request:Request,kind:Literal['photo','audio'],filename:str='attachment',x_asset_id:str | None=Header(default=None)):
+    async def upload(identity:str,request:Request,kind:Literal['photo','audio','video'],filename:str='attachment',x_asset_id:str | None=Header(default=None)):
         store.get(identity)
         if x_asset_id and x_asset_id in lifecycle.deletions(store)['media']: raise HTTPException(409,'This evidence was deleted. Refresh before continuing.')
         mime=request.headers.get('content-type','').split(';')[0].strip().lower()
         types={'image/jpeg':('.jpg','photo'),'image/png':('.png','photo'),
                'audio/mp4':('.m4a','audio'),'audio/x-m4a':('.m4a','audio'),'audio/wav':('.wav','audio'),
-               'audio/x-wav':('.wav','audio'),'audio/mpeg':('.mp3','audio')}
+               'audio/x-wav':('.wav','audio'),'audio/mpeg':('.mp3','audio'),
+               'video/mp4':('.mp4','video'),'video/quicktime':('.mov','video')}
         if mime not in types or types[mime][1]!=kind: raise HTTPException(415,'Unsupported media type')
         data=bytearray()
         async for chunk in request.stream():
@@ -268,7 +271,7 @@ def create_app(settings=None):
         if not data: raise HTTPException(422,'Empty file')
         if mime=='image/jpeg' and not data.startswith(b'\xff\xd8\xff'): raise HTTPException(415,'Invalid JPEG')
         if mime=='image/png' and not data.startswith(b'\x89PNG\r\n\x1a\n'): raise HTTPException(415,'Invalid PNG')
-        if mime in ('audio/mp4','audio/x-m4a') and data[4:8]!=b'ftyp': raise HTTPException(415,'Invalid M4A')
+        if mime in ('audio/mp4','audio/x-m4a','video/mp4','video/quicktime') and data[4:8]!=b'ftyp': raise HTTPException(415,'Invalid MP4/MOV container')
         if mime in ('audio/wav','audio/x-wav') and not (data[:4]==b'RIFF' and data[8:12]==b'WAVE'): raise HTTPException(415,'Invalid WAV')
         if mime=='audio/mpeg' and not (data[:3]==b'ID3' or (len(data)>1 and data[0]==255 and data[1]&224==224)):
             raise HTTPException(415,'Invalid MP3')
