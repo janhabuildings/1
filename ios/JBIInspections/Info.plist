@@ -11,9 +11,9 @@
 <key>LSRequiresIPhoneOS</key><true/>
 <key>UILaunchScreen</key><dict/>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
-<key>NSCameraUsageDescription</key><string>Take photographs of inspection conditions and associate them with report findings.</string>
+<key>NSCameraUsageDescription</key><string>Capture inspection photos and videos and associate them with report findings.</string>
 <key>NSMicrophoneUsageDescription</key><string>Record on-site conversations after participants are informed and consent requirements are met.</string>
-<key>NSSpeechRecognitionUsageDescription</key><string>Transcribe imported or recorded inspection audio on this device where supported.</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>Transcribe recorded inspection audio on this device, or using Apple speech recognition only when you choose it.</string>
 <key>NSLocalNetworkUsageDescription</key><string>Connect to your inspection backend during local development.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
