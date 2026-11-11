@@ -86,7 +86,9 @@ import Foundation
     private func performSync(_ inspection: Inspection) async throws {
         try await flushDeletions()
         guard cache.inspections.contains(where: { $0.id == inspection.id }) else { return }
-        _ = try await api.request("/inspections/\(inspection.id)", method: "PUT", body: JSONEncoder().encode(inspection))
+        var outbound = inspection
+        outbound.prepareAttendees()
+        _ = try await api.request("/inspections/\(inspection.id)", method: "PUT", body: JSONEncoder().encode(outbound))
         let snapshot = cache.media.filter { $0.inspectionID == inspection.id }
         let records = try JSONSerialization.jsonObject(with: await api.request("/inspections/\(inspection.id)/media")) as? [[String: Any]] ?? []
         let remoteIDs = Set(records.compactMap { $0["id"] as? String })
@@ -125,7 +127,7 @@ import Foundation
             let records = try JSONSerialization.jsonObject(with: await api.request("/inspections/\(inspection.id)/media")) as? [[String: Any]] ?? []
             for record in records {
                 guard let id = record["id"] as? String, let kind = record["kind"] as? String, let mime = record["mime"] as? String else { continue }
-                let ext = mime == "image/png" ? "png" : mime == "image/jpeg" ? "jpg" : mime == "audio/wav" ? "wav" : mime == "audio/mpeg" ? "mp3" : "m4a"
+                let ext = ["image/png": "png", "image/jpeg": "jpg", "audio/wav": "wav", "audio/mpeg": "mp3", "audio/mp4": "m4a", "video/mp4": "mp4", "video/quicktime": "mov"][mime] ?? "bin"
                 if let index = cache.media.firstIndex(where: { $0.id == id }) {
                     if !FileManager.default.fileExists(atPath: mediaURL(cache.media[index]).path) {
                         let bytes = try await api.request("/media/\(id)")
