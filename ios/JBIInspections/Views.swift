@@ -241,7 +241,7 @@ struct InspectionDetail: View {
                     applyCalendar(previousTitle: previous)
                     inspection.confirmCalendarTitle(title, candidates: calendarCandidates ?? inspection.calendar_candidates)
                 }
-            }), calendarTitles: calendarCandidates?.titles ?? inspection.calendar_candidates?.titles ?? [])
+            }), calendarTitles: calendarCandidates?.titles ?? inspection.calendar_candidates?.titles ?? [], calendarSubjects: calendarCandidates?.report_subjects ?? inspection.calendar_candidates?.report_subjects ?? [])
         }
         .onChange(of: inspection) { _, value in store.save(value); scheduleSync() }
         .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
@@ -379,7 +379,7 @@ struct InspectionDetail: View {
         Section("Capture") {
             Button("Open camera · photo or video", systemImage: "camera") {
                 finishRecording()
-                guard UIImagePickerController.isSourceTypeAvailable(.camera) else { store.error = "A physical iPhone camera is required."; return }
+                guard AVCaptureDevice.default(for: .video) != nil else { store.error = "A physical iPhone camera is required."; return }
                 AVCaptureDevice.requestAccess(for: .video) { granted in
                     Task { @MainActor in if granted { captureSessionActive = true; camera = true } else { store.error = "Enable camera permission in iPhone Settings." } }
                 }
