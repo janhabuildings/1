@@ -1,0 +1,24 @@
+name: Check App Store Connect build
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Build number to look up (does not upload)
+        required: true
+        default: '19.1'
+permissions:
+  contents: read
+jobs:
+  status:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Apple build and upload status
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: python3 scripts/check_app_store_build.py
