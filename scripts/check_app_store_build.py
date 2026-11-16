@@ -69,8 +69,25 @@ def get(token, path, **params):
         with urllib.request.build_opener(NoRedirect).open(request, timeout=45) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
-        # Avoid logging response bodies or headers, which may reflect credentials.
-        raise RuntimeError(f'Apple API returned HTTP {error.code} for {path}') from None
+        # Show only Apple's structured error fields; never headers or raw bodies.
+        details = []
+        try:
+            payload = json.loads(error.read(32768))
+            for item in payload.get('errors', [])[:5]:
+                if isinstance(item, dict):
+                    details.append(' | '.join(str(item[field]) for field in
+                                   ('code', 'title', 'detail') if field in item))
+        except (ValueError, AttributeError, TypeError):
+            pass
+        message = f'Apple API returned HTTP {error.code} for {path}'
+        if details:
+            message += ': ' + '; '.join(details)
+        for secret in [token] + [os.environ.get(name, '') for name in
+                       ('ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_PRIVATE_KEY')]:
+            if secret:
+                message = message.replace(secret, '[REDACTED]')
+        message = ' '.join(message.split())[:3000]
+        raise RuntimeError(message) from None
 
 
 def describe(build, included):
