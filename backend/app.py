@@ -200,7 +200,10 @@ def create_app(settings=None):
         cloud.restore()
         templates=TemplateManager(store)
         store.cloud=cloud
-        cloud.sync()
+    from backend.saved_row_history import import_history
+    history_import=import_history(store,once=True)
+    if history_import is not None:print('Saved-row history import: '+json.dumps(history_import),flush=True)
+    if cloud:cloud.sync()
     storage_lock=asyncio.Lock()
     app=FastAPI(title='JBI Inspections',version='0.1.0',docs_url=None,redoc_url=None)
     app.state.store=store
@@ -277,6 +280,10 @@ def create_app(settings=None):
             if len(existing)>=1000 and not any(item['id']==row['id'] for item in existing):raise HTTPException(422,'Saved row limit reached; delete unused entries first')
             db.execute('INSERT INTO saved_rows VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(row['id'],json.dumps(row)))
         return row
+
+    @app.post('/saved-rows/import-history',dependencies=[Depends(authorized)])
+    def import_saved_rows():
+        return import_history(store)
 
     @app.delete('/saved-rows/{identity}',dependencies=[Depends(authorized)])
     def delete_saved_row(identity:str):

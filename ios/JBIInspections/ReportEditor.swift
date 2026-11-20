@@ -464,6 +464,16 @@ struct SavedRowLibrary: View {
     var body: some View {
         List {
             Text("Save rows while drafting. Selecting a saved suggestion fills its nonempty cells; every value stays editable. Synced rows are shared across web and iPhone.").font(.caption)
+            Button("Import from saved reports") {
+                Task {
+                    do {
+                        _ = try await store.api.request("/saved-rows/import-history", method: "POST")
+                        try await store.syncSuggestions()
+                        store.libraryNotice = "Saved report rows imported. Duplicates were skipped."
+                    } catch { store.error = error.localizedDescription }
+                }
+            }.disabled(!store.connected)
+            if !store.libraryNotice.isEmpty { Text(store.libraryNotice).font(.caption) }
             ForEach((store.cache.savedRows ?? []).filter { query.isEmpty || $0.summary.localizedCaseInsensitiveContains(query) }) { row in
                 VStack(alignment: .leading) {
                     Text(row.summary)
