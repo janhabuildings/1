@@ -54,3 +54,18 @@ class SavedDrafting(unittest.TestCase):
         duplicate=self.save(kind='company',company=' acme ');self.assertEqual(company['id'],duplicate['id'])
         self.client.delete('/saved-rows/'+company['id'],headers=self.headers)
         self.assertEqual(self.client.get('/saved-rows',headers=self.headers).json(),[attendee])
+
+    def test_coded_draft_works_without_ai_key_consent_or_provider_request(self):
+        self.app.state.settings.ai_key=''
+        saved=self.save(kind='attendee',name='Jane Smith',company='ACME',title='Safety Inspector')
+        item=self.client.post('/inspections',headers=self.headers,json={'title':'Coded fixture','inspection_date':'2026-11-20',
+            'transcript':'Attendee: Jane Smith. Equipment: Scaffold. Location: North. Action: Install pins.'}).json()
+        path='/inspections/'+item['id']+'/transcript-draft/rules'
+        self.assertEqual(self.client.post(path).status_code,401)
+        with patch('backend.app.httpx.AsyncClient',side_effect=AssertionError('No AI request allowed')):
+            result=self.client.post(path,headers=self.headers)
+        self.assertEqual(result.status_code,200,result.text);draft=result.json()['draft']
+        self.assertEqual(result.json()['method'],'rules');self.assertFalse(result.json()['applied_to_report'])
+        self.assertEqual(draft['attendees'][0]['matched_saved_id'],saved['id']);self.assertEqual(draft['attendees'][0]['company'],'ACME')
+        self.assertEqual(draft['open_items'][0]['equipment'],'SF')
+        self.assertEqual(self.client.get('/inspections/'+item['id'],headers=self.headers).json()['reports'],[])

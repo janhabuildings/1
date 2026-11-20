@@ -1,0 +1,388 @@
+[
+  {
+    "name": "labeled attendee and item",
+    "text": "Attendee: John Smith. Company: ABC. Role: Site Supervisor. Equipment: Scaffold. Location: North. Action: Install missing pins.",
+    "attendees": [
+      {
+        "name": "John Smith",
+        "company": "ABC",
+        "title": "Site Supervisor"
+      }
+    ],
+    "open_items": [
+      {
+        "equipment": "SF",
+        "location": "North",
+        "action": "Install missing pins"
+      }
+    ],
+    "library": [],
+    "facts": []
+  },
+  {
+    "name": "spoken labels",
+    "text": "Attendee Jane Smith. Company ACME. Role Safety Inspector. Equipment Sidewalk Shed. Location East. Corrective action Replace panel.",
+    "attendees": [
+      {
+        "name": "Jane Smith",
+        "company": "ACME",
+        "title": "Safety Inspector"
+      }
+    ],
+    "open_items": [
+      {
+        "equipment": "SH",
+        "location": "East",
+        "action": "Replace panel"
+      }
+    ],
+    "library": [],
+    "facts": []
+  },
+  {
+    "name": "exact saved attendee",
+    "text": "Attendee: Jane Smith.",
+    "library": [
+      {
+        "id": "jane",
+        "kind": "attendee",
+        "equipment": "",
+        "name": "Jane Smith",
+        "company": "ACME",
+        "title": "Safety Inspector",
+        "location": "",
+        "action": ""
+      }
+    ],
+    "attendees": [
+      {
+        "name": "Jane Smith",
+        "company": "ACME",
+        "title": "Safety Inspector",
+        "matched_saved_id": "jane"
+      }
+    ],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "ambiguous saved name",
+    "text": "Attendee: Jane Smith.",
+    "library": [
+      {
+        "id": "jane",
+        "kind": "attendee",
+        "equipment": "",
+        "name": "Jane Smith",
+        "company": "ACME",
+        "title": "Safety Inspector",
+        "location": "",
+        "action": ""
+      },
+      {
+        "id": "jane2",
+        "kind": "attendee",
+        "equipment": "",
+        "name": "Jane Smith",
+        "company": "Other",
+        "title": "",
+        "location": "",
+        "action": ""
+      }
+    ],
+    "attendees": [
+      {
+        "name": "Jane Smith",
+        "company": "",
+        "title": "",
+        "matched_saved_id": null,
+        "saved_match_ids": [
+          "jane",
+          "jane2"
+        ]
+      }
+    ],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "similar saved name",
+    "text": "Attendee: Jaine Smith.",
+    "library": [
+      {
+        "id": "jane",
+        "kind": "attendee",
+        "equipment": "",
+        "name": "Jane Smith",
+        "company": "ACME",
+        "title": "Safety Inspector",
+        "location": "",
+        "action": ""
+      }
+    ],
+    "attendees": [
+      {
+        "name": "Jaine Smith",
+        "company": "",
+        "matched_saved_id": null,
+        "saved_match_ids": [
+          "jane"
+        ]
+      }
+    ],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "exact saved item",
+    "text": "Action: Replace warped panel.",
+    "library": [
+      {
+        "id": "panel",
+        "kind": "open_item",
+        "equipment": "SH",
+        "name": "",
+        "company": "",
+        "title": "",
+        "location": "North elevation",
+        "action": "Replace warped panel"
+      }
+    ],
+    "open_items": [
+      {
+        "equipment": "SH",
+        "location": "North elevation",
+        "action": "Replace warped panel",
+        "matched_saved_id": "panel"
+      }
+    ],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "equipment mismatch",
+    "text": "Equipment: Scaffold. Action: Replace warped panel.",
+    "library": [
+      {
+        "id": "panel",
+        "kind": "open_item",
+        "equipment": "SH",
+        "name": "",
+        "company": "",
+        "title": "",
+        "location": "North elevation",
+        "action": "Replace warped panel"
+      }
+    ],
+    "open_items": [
+      {
+        "equipment": "SF",
+        "location": "",
+        "action": "Replace warped panel",
+        "saved_match_ids": []
+      }
+    ],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "negated item discarded",
+    "text": "Equipment: Shed. Location: North. Action: Already repaired.",
+    "open_items": [],
+    "library": [],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "no outcome inferred",
+    "text": "No open items. Everything is complete.",
+    "open_items": [],
+    "library": [],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "unknown equipment",
+    "text": "Equipment: Mystery platform. Location: North. Action: Replace panel.",
+    "open_items": [
+      {
+        "equipment": "unknown",
+        "location": "North",
+        "action": "Replace panel"
+      }
+    ],
+    "library": [],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "unstructured text stays empty",
+    "text": "John from ABC was supervising and the north panels need replacing.",
+    "library": [],
+    "attendees": [],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "multiple items share explicit equipment",
+    "text": "Equipment: Scaffold. Location: North. Action: Install pins. Location: South. Action: Secure planks.",
+    "open_items": [
+      {
+        "equipment": "SF",
+        "location": "North",
+        "action": "Install pins"
+      },
+      {
+        "equipment": "SF",
+        "location": "South",
+        "action": "Secure planks"
+      }
+    ],
+    "library": [],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "absent attendee",
+    "text": "Attendee: John Smith not present. Company: ACME. Role: Supervisor.",
+    "library": [],
+    "attendees": [],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "observation not an action",
+    "text": "Observation: Rust on panel.",
+    "library": [],
+    "attendees": [],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "common facts and ISO date",
+    "text": "Client: ABC. Project: PS123. Inspection date: 2026-11-20. Request date: 11/19/2026.",
+    "facts": [
+      {
+        "field": "client",
+        "value": "ABC"
+      },
+      {
+        "field": "project",
+        "value": "PS123"
+      },
+      {
+        "field": "inspection_date",
+        "value": "2026-11-20"
+      }
+    ],
+    "library": [],
+    "attendees": [],
+    "open_items": []
+  },
+  {
+    "name": "company punctuation",
+    "text": "Name: Kamruz Zaman. Company: Janha Building Ideas, Inc. Role: PE.",
+    "attendees": [
+      {
+        "name": "Kamruz Zaman",
+        "company": "Janha Building Ideas, Inc",
+        "title": "PE"
+      }
+    ],
+    "library": [],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "person labels in different order",
+    "text": "Company: ABC\nRole: PE\nAttendee: John Smith",
+    "attendees": [
+      {
+        "name": "John Smith",
+        "company": "ABC",
+        "title": "PE"
+      }
+    ],
+    "library": [],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "multiple people and multi company",
+    "text": "Attendee: Jane Smith;Company: ACME; NYC SCA;Role: Safety Inspector;Attendee: John Smith;Company: ABC;Role: Supervisor",
+    "attendees": [
+      {
+        "name": "Jane Smith",
+        "company": "ACME; NYC SCA",
+        "title": "Safety Inspector"
+      },
+      {
+        "name": "John Smith",
+        "company": "ABC",
+        "title": "Supervisor"
+      }
+    ],
+    "library": [],
+    "open_items": [],
+    "facts": []
+  },
+  {
+    "name": "other equipment",
+    "text": "Equipment: Shoring. Location: West. Action: Secure connections.",
+    "open_items": [
+      {
+        "equipment": "OT",
+        "location": "West",
+        "action": "Secure connections"
+      }
+    ],
+    "library": [],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "switch equipment",
+    "text": "Equipment: Shed. Location: North. Action: Repair panel. Equipment: Scaffold. Location: South. Action: Install pins.",
+    "open_items": [
+      {
+        "equipment": "SH",
+        "location": "North",
+        "action": "Repair panel"
+      },
+      {
+        "equipment": "SF",
+        "location": "South",
+        "action": "Install pins"
+      }
+    ],
+    "library": [],
+    "attendees": [],
+    "facts": []
+  },
+  {
+    "name": "company only entry never matches person",
+    "text": "Attendee: ACME.",
+    "library": [
+      {
+        "id": "company",
+        "kind": "company",
+        "equipment": "",
+        "name": "",
+        "company": "ACME",
+        "title": "",
+        "location": "",
+        "action": ""
+      }
+    ],
+    "attendees": [
+      {
+        "name": "ACME",
+        "company": "",
+        "title": "",
+        "saved_match_ids": []
+      }
+    ],
+    "open_items": [],
+    "facts": []
+  }
+]

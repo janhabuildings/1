@@ -298,7 +298,7 @@ struct SuggestedCitation: Decodable, Identifiable {
 struct DeletionState: Decodable { var inspections: [String]; var media: [String] }
 struct StampAsset: Decodable { var id: String; var owner: String; var sha256: String }
 
-struct SavedRow: Codable, Equatable, Identifiable {
+struct SavedRow: Codable, Sendable, Equatable, Identifiable {
     var id = UUID().uuidString
     var kind: String
     var equipment = ""
@@ -312,7 +312,7 @@ struct SavedRow: Codable, Equatable, Identifiable {
         switch key { case "name": return name; case "company": return company; case "title": return title; case "location": return location; default: return action }
     }
 }
-struct DraftPerson: Codable, Identifiable {
+struct DraftPerson: Codable, Sendable, Identifiable {
     var saved_matches: [SavedRow] = []
     var matched_saved_id: String?
     var id: String
@@ -321,7 +321,7 @@ struct DraftPerson: Codable, Identifiable {
     var title: String
     var source_quote: String
 }
-struct DraftOpenItem: Codable, Identifiable {
+struct DraftOpenItem: Codable, Sendable, Identifiable {
     var saved_matches: [SavedRow] = []
     var matched_saved_id: String?
     var id: String
@@ -330,13 +330,13 @@ struct DraftOpenItem: Codable, Identifiable {
     var action: String
     var source_quote: String
 }
-struct DraftFact: Codable, Identifiable {
+struct DraftFact: Codable, Sendable, Identifiable {
     var id: String { field }
     var field: String
     var value: String
     var source_quote: String
 }
-struct TranscriptDraft: Codable {
+struct TranscriptDraft: Codable, Sendable {
     var attendees: [DraftPerson] = []
     var open_items: [DraftOpenItem] = []
     var facts: [DraftFact] = []
@@ -387,5 +387,135 @@ extension Inspection {
             }
         }
         refreshTitle(force: true)
+    }
+}
+
+// Pure, offline extraction of explicitly labeled transcript fields.
+enum CodedTranscript {
+    static let labels = ["attendee":"name", "attendees":"name", "name":"name", "company":"company", "company name":"company", "agency":"company", "company / agency":"company", "role":"title", "title":"title", "equipment":"equipment", "product":"equipment", "location":"location", "occurrence":"location", "corrective action":"action", "action":"action", "open item":"open_item", "observation":"observation", "client":"client", "project":"project", "address":"address", "requested by":"requested_by", "request date":"request_date", "inspection date":"inspection_date", "inspected on":"inspection_date"]
+    static let limits = ["name":300, "company":300, "title":300, "location":3000, "action":5000, "project":200, "client":1000, "address":2000, "requested_by":1000, "request_date":10, "inspection_date":10]
+    static let negated = #"\b(?:no open items?|no deficiencies|not required|no need|do not|already (?:fixed|repaired|corrected|completed)|(?:has|have) been (?:fixed|repaired|corrected))\b"#
+    static func matches(_ pattern: String, _ value: String) -> [NSTextCheckingResult] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        return regex.matches(in: value, range: NSRange(location: 0, length: (value as NSString).length))
+    }
+    static func normalized(_ value: String) -> String {
+        let source = value.lowercased() as NSString
+        return matches(#"\w+"#, source as String).map { source.substring(with: $0.range) }.joined(separator: " ")
+    }
+    static func similarity(_ left: String, _ right: String) -> Double {
+        let a = Array(normalized(left).prefix(400)), b = Array(normalized(right).prefix(400))
+        guard !a.isEmpty && !b.isEmpty else { return 0 }
+        if a == b { return 1 }
+        var previous = Array(0...b.count)
+        for (i, x) in a.enumerated() {
+            var current = [i + 1]
+            for (j, y) in b.enumerated() { current.append(min(current[j] + 1, previous[j + 1] + 1, previous[j] + (x == y ? 0 : 1))) }
+            previous = current
+        }
+        return 1 - Double(previous[b.count]) / Double(max(a.count, b.count))
+    }
+    static func ranked(_ values: [String:String], equipment: String, kind: String, library: [SavedRow]) -> [(Double,SavedRow)] {
+        let keys = kind == "attendee" ? ["name"] : ["action", "location"]
+        return library.filter { $0.kind == kind && (kind == "attendee" || equipment == "unknown" || $0.equipment.isEmpty || $0.equipment == equipment) }.compactMap { saved -> (Double, SavedRow)? in
+            let score = keys.filter { normalized(values[$0] ?? "").count >= 3 }.map { similarity(values[$0] ?? "", saved.value($0)) }.max() ?? 0
+            return score >= 0.64 ? (score,saved) : nil
+        }.sorted { $0.0 > $1.0 }
+    }
+    static func equipmentCode(_ value: String) -> String {
+        let text = normalized(value)
+        if ["sf","scaffold","supported scaffold"].contains(text) { return "SF" }
+        if ["sh","shed","sidewalk shed"].contains(text) { return "SH" }
+        if ["ot","other","soe","support of excavation","shoring","sstab","structural stability","fp","fall protection","fence","structural netting","structural netting as ohp"].contains(text) { return "OT" }
+        return "unknown"
+    }
+    static func extract(_ text: String, library: [SavedRow]) -> TranscriptDraft {
+        var draft = TranscriptDraft(warnings: ["Coded extraction only; no AI service was used. Review every value before applying."])
+        let source = text as NSString
+        let label = labels.keys.sorted { $0.count > $1.count }.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+        let split = #"[\r\n]+|(?<=[.;!?])\s+(?=(?:"# + label + #")\b)|;\s*(?=(?:"# + label + #")\b)|,\s*(?=(?:"# + label + #")\s*(?::|\s))"#
+        let field = #"^\s*("# + label + #")\b\s*(?::|=|\s+-\s+)?\s*(.+?)\s*$"#
+        var person: [String:String] = [:], item: [String:String] = [:]
+        var personStart = 0, personEnd = 0, itemStart = 0, itemEnd = 0
+        var equipment = "unknown"
+        var equipmentStart: Int? = nil
+        var seenFacts: Set<String> = []
+        func warn(_ message: String) { if !draft.warnings.contains(message) && draft.warnings.count < 30 { draft.warnings.append(message) } }
+        func flushPerson() {
+            defer { person = [:] }
+            guard person.values.contains(where: { !$0.isEmpty }), draft.attendees.count < 50 else { return }
+            let quote = source.substring(with: NSRange(location: personStart, length: personEnd - personStart)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard quote.count <= 5000, matches(#"\b(?:absent|not present|not attending|did not attend|not an attendee|not on site|not here)\b"#, quote).isEmpty, matches(#"^(?:not|no)\b"#, person["name"] ?? "").isEmpty else { return }
+            var row = DraftPerson(id: UUID().uuidString, name: person["name"] ?? "", company: person["company"] ?? "", title: person["title"] ?? "", source_quote: quote)
+            let ranked = Self.ranked(person, equipment: "unknown", kind: "attendee", library: library)
+            row.saved_matches = Array(ranked.prefix(5).map { $0.1 })
+            let exact = ranked.filter { $0.0 == 1 }
+            if exact.count == 1 {
+                let saved = exact[0].1; row.matched_saved_id = saved.id
+                if row.name.isEmpty { row.name = saved.name }
+                if row.company.isEmpty { row.company = saved.company }
+                if row.title.isEmpty { row.title = saved.title }
+            }
+            draft.attendees.append(row)
+        }
+        func flushItem() {
+            defer { item = [:]; equipmentStart = nil }
+            guard !(item["location"] ?? "").isEmpty || !(item["action"] ?? "").isEmpty, draft.open_items.count < 100 else { return }
+            let quote = source.substring(with: NSRange(location: itemStart, length: itemEnd - itemStart)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard quote.count <= 5000 else { return }
+            guard matches(negated, quote).isEmpty else { warn("A negated or already-corrected item was not added; review its wording manually."); return }
+            var row = DraftOpenItem(id: UUID().uuidString, equipment: item["equipment"] ?? "unknown", location: item["location"] ?? "", action: item["action"] ?? "", source_quote: quote)
+            let ranked = Self.ranked(item, equipment: row.equipment, kind: "open_item", library: library)
+            row.saved_matches = Array(ranked.prefix(5).map { $0.1 })
+            let exact = ranked.filter { $0.0 == 1 }
+            if exact.count == 1 {
+                let saved = exact[0].1; row.matched_saved_id = saved.id
+                if row.location.isEmpty { row.location = saved.location }
+                if row.action.isEmpty { row.action = saved.action }
+                if row.equipment == "unknown" && !saved.equipment.isEmpty { row.equipment = saved.equipment }
+            }
+            draft.open_items.append(row)
+            if row.action.isEmpty { warn("A location has no explicit corrective action. Fill it or remove the item before applying.") }
+        }
+        let cuts = matches(split, text).map { ($0.range.location, NSMaxRange($0.range)) } + [(source.length,source.length)]
+        var start = 0
+        for (end, next) in cuts {
+            let chunkStart = start, chunk = source.substring(with: NSRange(location: start, length: end - start)); start = next
+            guard let match = matches(field, chunk).first else { continue }
+            let part = chunk as NSString
+            guard let key = labels[part.substring(with: match.range(at: 1)).lowercased()] else { continue }
+            let value = part.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".!?")).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            if let limit = limits[key], value.count > limit { warn("A value exceeded its cell limit and was left for manual entry."); continue }
+            if ["name","company","title"].contains(key) {
+                flushItem()
+                if person[key] != nil { flushPerson() }
+                if person.isEmpty { personStart = chunkStart }
+                person[key] = value; personEnd = end
+            } else if key == "equipment" {
+                flushPerson(); flushItem(); equipment = equipmentCode(value); equipmentStart = chunkStart
+                if equipment == "unknown" { warn("Equipment was not recognized. Assign the report type before applying.") }
+            } else if ["location","action","open_item","observation"].contains(key) {
+                flushPerson()
+                if key == "observation" { warn("Observations are not automatically converted into corrective actions."); continue }
+                if !matches(negated, value).isEmpty { item = [:]; equipmentStart = nil; warn("A negated or already-corrected item was not added; review its wording manually."); continue }
+                let target = key == "open_item" ? "action" : key
+                if !(item[target] ?? "").isEmpty || (target == "location" && !(item["action"] ?? "").isEmpty) { flushItem() }
+                if item.isEmpty { itemStart = equipmentStart ?? chunkStart; item["equipment"] = equipment }
+                item[target] = value; itemEnd = end
+                if key == "open_item" { warn("Confirm that the open-item wording describes the corrective action you want in the report.") }
+            } else {
+                flushPerson(); flushItem()
+                if seenFacts.contains(key) { warn("Repeated common facts were left for review; only the first labeled value is proposed."); continue }
+                if key.hasSuffix("_date") {
+                    let formatter = DateFormatter(); formatter.calendar = Calendar(identifier: .gregorian); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"; formatter.isLenient = false
+                    guard !matches(#"^\d{4}-\d{2}-\d{2}$"#, value).isEmpty, let date = formatter.date(from: value), formatter.string(from: date) == value else { warn("Use YYYY-MM-DD for coded date extraction."); continue }
+                }
+                seenFacts.insert(key); draft.facts.append(DraftFact(field: key, value: value, source_quote: chunk.trimmingCharacters(in: .whitespacesAndNewlines)))
+            }
+        }
+        flushPerson(); flushItem()
+        if draft.attendees.isEmpty && draft.open_items.isEmpty && draft.facts.isEmpty { warn("No labeled values found. Try: Attendee: John Smith. Company: ABC. Role: Site Supervisor. Equipment: Scaffold. Location: North. Action: Install missing pins. Or choose optional AI for unstructured notes.") }
+        return draft
     }
 }

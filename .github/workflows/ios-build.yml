@@ -29,6 +29,10 @@ jobs:
         run: |
           swiftc ios/JBIInspections/Models.swift ios/Tests/CalendarRegression.swift -o "$RUNNER_TEMP/calendar-regression"
           "$RUNNER_TEMP/calendar-regression"
+      - name: Verify offline transcript extraction against shared fixtures
+        run: |
+          swiftc ios/JBIInspections/Models.swift ios/Tests/CodedTranscriptRegression.swift -o "$RUNNER_TEMP/transcript-regression"
+          "$RUNNER_TEMP/transcript-regression"
       - name: Compile iPhone simulator app
         run: |
           set -o pipefail
