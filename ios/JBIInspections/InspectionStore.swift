@@ -5,6 +5,8 @@ import Foundation
     @Published var cache = Cache()
     @Published var error: String?
     @Published var busy = false
+    @Published var libraryNotice = ""
+    private var suggestionSync: (id: UUID, task: Task<Void, Error>)?
     let directory: URL
     private var activeSyncs: [String: (id: UUID, task: Task<Void, Error>)] = [:]
     init() {
@@ -20,6 +22,49 @@ import Foundation
         } catch { self.error = "Local storage: \(error.localizedDescription)" }
     }
     var api: API { API(baseURL: UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL, token: SecureToken.read()) }
+    func saveSuggestion(_ row: SavedRow) {
+        guard !(row.kind == "attendee" ? [row.name,row.company,row.title] : [row.location,row.action]).allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return }
+        var rows = cache.savedRows ?? []
+        if rows.contains(where: { $0.summary.caseInsensitiveCompare(row.summary) == .orderedSame && $0.kind == row.kind }) { libraryNotice = "This row is already saved."; return }
+        rows.insert(row, at: 0); cache.savedRows = rows
+        if cache.pendingSavedRows == nil { cache.pendingSavedRows = [] }
+        cache.pendingSavedRows?.insert(row.id); persist()
+        libraryNotice = "Row saved on this phone."
+        Task {
+            do { try await syncSuggestions(); if connected { libraryNotice = "Row saved and synced for reuse on web and iPhone." } }
+            catch { libraryNotice = "Saved on this phone · sync pending"; self.error = "Saved on this phone; library sync pending: " + error.localizedDescription }
+        }
+    }
+    func syncSuggestions() async throws {
+        guard connected else { return }
+        while let previous = suggestionSync {
+            let result = await previous.task.result
+            if suggestionSync?.id == previous.id { suggestionSync = nil }
+            try result.get()
+        }
+        let id = UUID()
+        let task = Task { try await performSuggestionSync() }
+        suggestionSync = (id, task)
+        defer { if suggestionSync?.id == id { suggestionSync = nil } }
+        try await task.value
+    }
+    private func performSuggestionSync() async throws {
+        for id in cache.pendingSavedRows ?? [] {
+            guard let row = cache.savedRows?.first(where: { $0.id == id }) else { continue }
+            let data = try await api.request("/saved-rows", method: "POST", body: JSONEncoder().encode(row))
+            let remote = try JSONDecoder().decode(SavedRow.self, from: data)
+            cache.savedRows?.removeAll { $0.id == id || $0.id == remote.id }
+            cache.savedRows?.insert(remote, at: 0); cache.pendingSavedRows?.remove(id); persist()
+        }
+        let remote = try JSONDecoder().decode([SavedRow].self, from: await api.request("/saved-rows"))
+        let pending = (cache.savedRows ?? []).filter { cache.pendingSavedRows?.contains($0.id) == true }
+        cache.savedRows = pending + remote.filter { row in !pending.contains(where: { $0.id == row.id }) }; persist()
+    }
+    func deleteSuggestion(_ row: SavedRow) async throws {
+        if connected { try await syncSuggestions(); _ = try await api.request("/saved-rows/\(row.id)", method: "DELETE") }
+        else if cache.pendingSavedRows?.contains(row.id) != true { throw APIError(message: "Connect before deleting a synced library row.") }
+        cache.savedRows?.removeAll { $0.id == row.id }; cache.pendingSavedRows?.remove(row.id); persist()
+    }
     func persist() {
         do { try JSONEncoder().encode(cache).write(to: directory.appendingPathComponent("cache.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
         catch { self.error = "Could not save inspection: \(error.localizedDescription)" }
@@ -113,6 +158,7 @@ import Foundation
         try await refresh()
     }
     func refresh() async throws {
+        try await syncSuggestions()
         try await flushDeletions()
         let deleted = try JSONDecoder().decode(DeletionState.self, from: await api.request("/sync/deletions"))
         for item in cache.media where deleted.media.contains(item.id) || deleted.inspections.contains(item.inspectionID) { try? FileManager.default.removeItem(at: mediaURL(item)) }

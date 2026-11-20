@@ -34,3 +34,12 @@
 
 .findings-row textarea{line-height:20px;white-space:pre;overflow:auto;scrollbar-width:none}
 .findings-row textarea::-webkit-scrollbar{display:none}
+
+.saved-row-suggestions{display:flex;flex-direction:column;gap:4px;font-size:12px;min-width:0;max-height:220px;overflow:auto}
+.saved-row-suggestions button{text-align:left;white-space:normal;overflow-wrap:anywhere;font-size:12px;padding:6px}
+.attendee-row>.attendee-name{flex-direction:column}
+.attendee-row>.saved-row-save{grid-column:1 / -1;grid-row:2;justify-self:start;font-size:12px;padding:5px 10px}
+.attendee-row>.remove-icon{grid-column:4;grid-row:1}
+.findings-row>.saved-row-save{grid-column:1 / 3;grid-row:2;justify-self:start;font-size:12px;padding:5px 10px}
+.findings-row>.remove-icon{grid-column:3;grid-row:1}
+@media(max-width:650px){.findings-row>.remove-icon{grid-column:2}.findings-row>.saved-row-save{grid-row:auto;grid-column:1}.attendee-row>.saved-row-save{grid-row:auto}.attendee-row>.remove-icon{grid-column:auto;grid-row:auto}}

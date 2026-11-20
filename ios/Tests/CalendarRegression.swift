@@ -131,6 +131,27 @@ import Foundation
         precondition(Inspection.equipmentCode("Structural Stability") == "SStab")
         precondition(Inspection.equipmentCode("Fall Protection") == "FP")
         precondition(Inspection.equipmentCode("Unusual equipment") == "Unusual equipment")
+        // Transcript drafts merge without rewriting reviewed facts or report attendee overrides.
+        var dictated = Inspection()
+        dictated.project = "Reviewed project"; dictated.client = "Client"
+        dictated.prepareAttendees()
+        var separate = ReportDraft(equipment: "SH")
+        separate.attendees_override = true; separate.attendees = [Attendee(name: "Report only")]
+        separate.status = "No OIs"; separate.stamp_requested = true
+        dictated.reports = [separate]
+        let draft = TranscriptDraft(
+            attendees: [DraftPerson(id: "person", name: "Jane Smith", company: "Client", title: "Competent Person/Site Supervisor", source_quote: "Jane")],
+            open_items: [DraftOpenItem(id: "item", equipment: "SF", location: "North", action: "Replace panel", source_quote: "panel")],
+            facts: [DraftFact(field: "project", value: "Unreviewed project", source_quote: "project")])
+        dictated.applyTranscriptDraft(draft); dictated.applyTranscriptDraft(draft)
+        precondition(dictated.project == "Reviewed project")
+        precondition(dictated.sharedAttendees.filter { $0.name == "Jane Smith" }.count == 1)
+        precondition(dictated.sharedAttendees.last?.name == "Kamruz Zaman")
+        precondition(dictated.reports.first { $0.equipment == "SH" }!.attendees[0].name == "Report only")
+        precondition(dictated.reports.first { $0.equipment == "SH" }!.stamp_requested == true)
+        precondition(dictated.reports.first { $0.equipment == "SF" }!.open_items.count == 1)
+        precondition(dictated.reports.first { $0.equipment == "SF" }!.status == "OIs")
+        precondition(dictated.reports.first { $0.equipment == "SF" }!.stamp_requested == false)
         print("Calendar extraction, selection, manual edits, reopen and legacy-cache regression checks passed.")
     }
 }

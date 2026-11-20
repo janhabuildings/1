@@ -124,6 +124,9 @@ struct InspectionDetail: View {
     @StateObject private var audio = AudioCapture()
     @StateObject private var dictation = LiveDictation()
     @State private var liveConsent = false
+    @State private var transcriptConsent = false
+    @State private var showTranscriptDraft = false
+    @State private var transcriptDraft = TranscriptDraft()
     @Environment(\.scenePhase) private var phase
     @State private var camera = false
     @State private var calendarExpanded = false
@@ -174,7 +177,7 @@ struct InspectionDetail: View {
                 Button(dictation.busy ? "Stop live transcription" : "Start live transcription",
                        systemImage: dictation.busy ? "stop.circle.fill" : "mic") {
                     if dictation.busy { dictation.stop() } else { liveConsent = true }
-                }.disabled(audio.recording || audio.transcribing)
+                }.disabled(audio.recording || audio.transcribing || busy)
                 if !dictation.message.isEmpty {
                     Text(dictation.message).font(.caption).foregroundStyle(.secondary)
                 }
@@ -182,8 +185,12 @@ struct InspectionDetail: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Review and correct transcriptions. They do not automatically become inspection findings.").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $inspection.transcript).frame(minHeight: 120).accessibilityLabel("Conversation transcript")
-                    .disabled(dictation.busy)
+                    .disabled(dictation.busy || busy)
+                Button("Analyze transcript and fill draft", systemImage: "sparkles") { transcriptConsent = true }
+                    .disabled(busy || dictation.busy || inspection.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.connected)
                 TextEditor(text: $inspection.notes).frame(minHeight: 100).accessibilityLabel("Inspector notes")
+                NavigationLink("Saved rows · attendees and open items") { SavedRowLibrary() }
+                if !store.libraryNotice.isEmpty { Text(store.libraryNotice).font(.caption).foregroundStyle(.secondary) }
             }
             reports
             Section("References") {
@@ -278,6 +285,7 @@ struct InspectionDetail: View {
         }
         .task {
             inspection.prepareAttendees()
+            do { try await store.syncSuggestions() } catch { status = "Saved-row library sync: " + error.localizedDescription }
             if inspection.generated_title == nil { inspection.generated_title = inspection.title }
             calendarCandidates = inspection.calendar_candidates
             if store.connected {
@@ -311,6 +319,16 @@ struct InspectionDetail: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Inform everyone before transcribing their speech. On-device recognition keeps audio on this phone. Apple speech service may send microphone audio to Apple and requires internet access.")
+        }
+        .confirmationDialog("Analyze transcript with AI?", isPresented: $transcriptConsent, titleVisibility: .visible) {
+            Button("Send transcript and review draft") { analyzeTranscript() }
+            Button("Cancel", role: .cancel) { }
+        } message: { Text("The transcript is sent to the configured AI provider. Saved attendees and open items are matched on your private backend. Review and edit the draft before applying; existing common facts are preserved.") }
+        .sheet(isPresented: $showTranscriptDraft) {
+            TranscriptDraftReview(draft: $transcriptDraft) {
+                inspection.applyTranscriptDraft(transcriptDraft)
+                store.save(inspection); scheduleSync(); showTranscriptDraft = false
+            }
         }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
         .quickLookPreview($reportPreviewURL)
@@ -753,6 +771,18 @@ struct InspectionDetail: View {
         store.save(inspection)
         scheduleSync()
     }
+    private func analyzeTranscript() {
+        guard !busy else { return }
+        Task {
+            busy = true; defer { busy = false }
+            do {
+                store.save(inspection); try await store.sync(inspection)
+                let data = try await store.api.json("/inspections/\(inspection.id)/transcript-draft", object: ["consent": true])
+                transcriptDraft = try JSONDecoder().decode(TranscriptDraftResponse.self, from: data).draft
+                showTranscriptDraft = true
+            } catch { store.error = "Transcript analysis: " + error.localizedDescription }
+        }
+    }
     private func analyze() {
         suggestedFindings = []; analysisChecks = []
         Task {
@@ -840,6 +870,74 @@ struct InspectionDetail: View {
                 let copies = try addresses(toMyself ? "" : draftCCEmails)
                 mail = MailPayload(subject: subject, html: html, attachments: attachments, sender: sender, to: recipients, cc: copies)
             } catch { store.error = error.localizedDescription }
+        }
+    }
+}
+
+struct TranscriptDraftReview: View {
+    @Binding var draft: TranscriptDraft
+    var apply: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Review every value. Existing common facts and report-specific attendee overrides are preserved. New open items change only their report to Open items and remove its stamp. Delete suggestions you do not want to apply.")
+                    ForEach(Array(draft.warnings.enumerated()), id: \.offset) { _, warning in Text(warning).font(.caption) }
+                }
+                Section("Common facts · fills empty fields only") {
+                    ForEach($draft.facts) { $fact in
+                        TextField(fact.field, text: $fact.value)
+                        Text("Transcript: " + fact.source_quote).font(.caption).foregroundStyle(.secondary)
+                    }.onDelete { draft.facts.remove(atOffsets: $0) }
+                }
+                Section("Attendees") {
+                    ForEach($draft.attendees) { $person in
+                        VStack(alignment: .leading) {
+                            TextField("Name", text: $person.name)
+                            TextField("Company / agency", text: $person.company)
+                            TextField("Role", text: $person.title)
+                            Text("Transcript: " + person.source_quote).font(.caption).foregroundStyle(.secondary)
+                            if person.matched_saved_id != nil { Text("Matched saved attendee · missing details filled from saved row").font(.caption) }
+                            ForEach(person.saved_matches) { saved in
+                                Button("Use saved: " + saved.summary) {
+                                    person.name = saved.name
+                                    if !saved.company.isEmpty { person.company = saved.company }
+                                    if !saved.title.isEmpty { person.title = saved.title }
+                                    person.matched_saved_id = saved.id
+                                }.font(.caption)
+                            }
+                        }
+                    }.onDelete { draft.attendees.remove(atOffsets: $0) }
+                }
+                Section("Open items") {
+                    ForEach($draft.open_items) { $item in
+                        VStack(alignment: .leading) {
+                            Picker("Report", selection: $item.equipment) {
+                                Text("Choose equipment before applying").tag("unknown")
+                                Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
+                            }
+                            TextField("Location / occurrence", text: $item.location, axis: .vertical)
+                            TextField("Corrective action", text: $item.action, axis: .vertical)
+                            Text("Transcript: " + item.source_quote).font(.caption).foregroundStyle(.secondary)
+                            if item.matched_saved_id != nil { Text("Matched saved open item · missing details filled from saved row").font(.caption) }
+                            ForEach(item.saved_matches) { saved in
+                                Button("Use saved: " + saved.summary) {
+                                    if !saved.location.isEmpty { item.location = saved.location }
+                                    if !saved.action.isEmpty { item.action = saved.action }
+                                    if !saved.equipment.isEmpty { item.equipment = saved.equipment }
+                                    item.matched_saved_id = saved.id
+                                }.font(.caption)
+                            }
+                        }
+                    }.onDelete { draft.open_items.remove(atOffsets: $0) }
+                }
+            }.navigationTitle("Review transcript draft")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Apply draft") { apply() }.disabled(draft.open_items.contains { $0.equipment == "unknown" }) }
+                ToolbarItem(placement: .primaryAction) { EditButton() }
+            }
         }
     }
 }
