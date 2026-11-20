@@ -90,6 +90,14 @@ class DurableStorage(unittest.TestCase):
             self.assertEqual(client.get('/capabilities',headers=HEADERS).json()['storage'],'cloudflare')
             self.assertEqual(client.get('/inspections',headers={}).status_code,401)
 
+    def test_saved_row_library_survives_fresh_server_and_deletion(self):
+        with TestClient(self.app('rows-first')) as client:
+            row=client.post('/saved-rows',headers=HEADERS,json={'kind':'open_item','equipment':'SH','location':'North','action':'Replace panel'}).json()
+        with TestClient(self.app('rows-second')) as client:
+            self.assertEqual(client.get('/saved-rows',headers=HEADERS).json()[0]['id'],row['id'])
+            self.assertEqual(client.delete('/saved-rows/'+row['id'],headers=HEADERS).status_code,200)
+        with TestClient(self.app('rows-third')) as client:self.assertEqual(client.get('/saved-rows',headers=HEADERS).json(),[])
+
     def test_cloud_failure_is_not_reported_as_saved_and_retry_is_idempotent(self):
         app=self.app('failure')
         with TestClient(app) as client:

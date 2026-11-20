@@ -6,17 +6,29 @@ enum AttendeeOptions {
 }
 
 struct AttendeeListFields: View {
+    @EnvironmentObject var store: InspectionStore
+    @FocusState private var nameFocus: String?
+    private var attendeeRows: [SavedRow] { (store.cache.savedRows ?? []).filter { $0.kind == "attendee" } }
+    private func fill(_ row: SavedRow, person: Binding<Attendee>) {
+        if !row.name.isEmpty { person.wrappedValue.name = row.name }
+        if !row.company.isEmpty { person.wrappedValue.company = row.company }
+        if !row.title.isEmpty { person.wrappedValue.title = row.title }
+    }
     @Binding var attendees: [Attendee]
     var client: String
     var body: some View {
         ForEach($attendees) { $person in
             VStack(alignment: .leading) {
                 HStack {
-                    TextField("Name", text: $person.name)
+                    TextField("Name", text: $person.name).focused($nameFocus, equals: person.id)
                     CompactRemoveButton(label: "Remove attendee") { attendees.removeAll { $0.id == person.id } }
                 }
-                MultiChoiceField(label: "Company / agency", value: $person.company, options: Array(Set(AttendeeOptions.companies + [client].filter { !$0.isEmpty })).sorted())
-                MultiChoiceField(label: "Role", value: $person.title, options: AttendeeOptions.roles)
+                if nameFocus == person.id {
+                    SavedRowMatches(query: person.name, key: "name", rows: attendeeRows) { row in fill(row, person: $person); nameFocus = nil }
+                }
+                MultiChoiceField(label: "Company / agency", value: $person.company, options: Array(Set(AttendeeOptions.companies + [client].filter { !$0.isEmpty })).sorted(), rowOptions: attendeeRows, rowKey: "company", chooseRow: { fill($0, person: $person) })
+                MultiChoiceField(label: "Role", value: $person.title, options: AttendeeOptions.roles, rowOptions: attendeeRows, rowKey: "title", chooseRow: { fill($0, person: $person) })
+                Button("Save attendee for reuse") { store.saveSuggestion(SavedRow(kind: "attendee", name: person.name, company: person.company, title: person.title)) }.font(.caption).buttonStyle(.borderless)
             }
         }
         Button("Add attendee") {
@@ -67,6 +79,9 @@ struct MultiChoiceField: View {
     @Binding var value: String
     var options: [String]
     var separator = "; "
+    var rowOptions: [SavedRow] = []
+    var rowKey = ""
+    var chooseRow: ((SavedRow) -> Void)?
     @State private var query = ""
     @FocusState private var searching: Bool
     private var selected: [String] {
@@ -103,6 +118,9 @@ struct MultiChoiceField: View {
             if searching {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        SavedRowMatches(query: query, key: rowKey, rows: rowOptions) { row in
+                            chooseRow?(row); query = ""; searching = false
+                        }
                         ForEach(options.filter { query.isEmpty || $0.localizedCaseInsensitiveContains(query) }, id: \.self) { option in
                             Button { toggle(option) } label: {
                                 HStack {
@@ -140,6 +158,9 @@ struct OpenItemTextCell: View {
     var label: String
     @Binding var value: String
     var options: [String] = []
+    var rowOptions: [SavedRow] = []
+    var rowKey = ""
+    var chooseRow: ((SavedRow) -> Void)?
     @FocusState private var editing: Bool
     private var matches: [String] {
         let query = (value.components(separatedBy: "\n").last ?? "").lowercased()
@@ -166,6 +187,9 @@ struct OpenItemTextCell: View {
                     .accessibilityLabel(label)
             }.font(.footnote).frame(height: 44).clipped()
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+            if editing {
+                SavedRowMatches(query: value, key: rowKey, rows: rowOptions) { row in chooseRow?(row); editing = false }
+            }
             if editing && !matches.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
@@ -186,6 +210,12 @@ struct OpenItemTextCell: View {
 }
 
 struct ReportEditor: View {
+    @EnvironmentObject var store: InspectionStore
+    private var itemRows: [SavedRow] { (store.cache.savedRows ?? []).filter { $0.kind == "open_item" && ($0.equipment.isEmpty || $0.equipment == report.equipment) } }
+    private func fill(_ row: SavedRow, finding: Binding<Finding>) {
+        if !row.location.isEmpty { finding.wrappedValue.location = row.location }
+        if !row.action.isEmpty { finding.wrappedValue.action = row.action }
+    }
     @Binding var report: ReportDraft
     var reportSelection: Binding<String>? = nil
     var calendarTitles: [String]
@@ -303,10 +333,11 @@ struct ReportEditor: View {
             if report.status == "OIs" { Section("Open items") {
                 ForEach($report.open_items) { $finding in
                     HStack(alignment: .top, spacing: 10) {
-                        OpenItemTextCell(label: "Location / occurrence", value: $finding.location)
-                        OpenItemTextCell(label: "Corrective action", value: $finding.action, options: CorrectionOptions.byEquipment[report.equipment] ?? [])
+                        OpenItemTextCell(label: "Location / occurrence", value: $finding.location, rowOptions: itemRows, rowKey: "location", chooseRow: { fill($0, finding: $finding) })
+                        OpenItemTextCell(label: "Corrective action", value: $finding.action, options: CorrectionOptions.byEquipment[report.equipment] ?? [], rowOptions: itemRows, rowKey: "action", chooseRow: { fill($0, finding: $finding) })
                         CompactRemoveButton(label: "Remove open item") { report.open_items.removeAll { $0.id == finding.id } }.padding(.top, 25)
                     }
+                    Button("Save open-item row for reuse") { store.saveSuggestion(SavedRow(kind: "open_item", equipment: report.equipment, location: finding.location, action: finding.action)) }.font(.caption).buttonStyle(.borderless)
                 }.onDelete { report.open_items.remove(atOffsets: $0) }
                 Button("Add open item") { report.open_items.append(Finding()) }
                 Text("Select only actions matching observed deficiencies. Multiple actions stay in this item’s cell; add separate items for different locations. Swipe to remove an item.").font(.caption)
@@ -410,5 +441,37 @@ struct CodeSearchView: View {
             }
         }.navigationTitle("Code references")
             .onChange(of: library) { _, _ in response = nil }
+    }
+}
+
+struct SavedRowMatches: View {
+    var query: String
+    var key: String
+    var rows: [SavedRow]
+    var choose: (SavedRow) -> Void
+    var body: some View {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count >= 2 {
+            ForEach(Array(rows.filter { $0.value(key).localizedCaseInsensitiveContains(text) }.prefix(5))) { row in
+                Button { choose(row) } label: { Label(row.summary, systemImage: "text.badge.checkmark").font(.caption) }.buttonStyle(.borderless)
+            }
+        }
+    }
+}
+struct SavedRowLibrary: View {
+    @EnvironmentObject var store: InspectionStore
+    @State private var query = ""
+    var body: some View {
+        List {
+            Text("Save rows while drafting. Selecting a saved suggestion fills its nonempty cells; every value stays editable. Synced rows are shared across web and iPhone.").font(.caption)
+            ForEach((store.cache.savedRows ?? []).filter { query.isEmpty || $0.summary.localizedCaseInsensitiveContains(query) }) { row in
+                VStack(alignment: .leading) {
+                    Text(row.summary)
+                    Text(store.cache.pendingSavedRows?.contains(row.id) == true ? "Saved on this phone · sync pending" : "Saved suggestion").font(.caption).foregroundStyle(.secondary)
+                    Button("Delete saved suggestion", role: .destructive) { Task { do { try await store.deleteSuggestion(row) } catch { store.error = error.localizedDescription } } }
+                }
+            }
+        }.searchable(text: $query).navigationTitle("Saved rows")
+        .task { do { try await store.syncSuggestions() } catch { store.error = error.localizedDescription } }
     }
 }

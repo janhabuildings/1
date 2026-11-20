@@ -210,6 +210,8 @@ struct Cache: Codable {
     var pendingInspectionDeletions: Set<String>?
     var pendingMediaDeletions: Set<String>?
     var artifactOwners: [String: String]?
+    var savedRows: [SavedRow]?
+    var pendingSavedRows: Set<String>?
 }
 
 struct SuggestedFinding: Decodable, Identifiable {
@@ -295,3 +297,94 @@ struct SuggestedCitation: Decodable, Identifiable {
 
 struct DeletionState: Decodable { var inspections: [String]; var media: [String] }
 struct StampAsset: Decodable { var id: String; var owner: String; var sha256: String }
+
+struct SavedRow: Codable, Equatable, Identifiable {
+    var id = UUID().uuidString
+    var kind: String
+    var equipment = ""
+    var name = ""
+    var company = ""
+    var title = ""
+    var location = ""
+    var action = ""
+    var summary: String { (kind == "attendee" ? [name, company, title] : [equipment, location, action]).filter { !$0.isEmpty }.joined(separator: " · ") }
+    func value(_ key: String) -> String {
+        switch key { case "name": return name; case "company": return company; case "title": return title; case "location": return location; default: return action }
+    }
+}
+struct DraftPerson: Codable, Identifiable {
+    var saved_matches: [SavedRow] = []
+    var matched_saved_id: String?
+    var id: String
+    var name: String
+    var company: String
+    var title: String
+    var source_quote: String
+}
+struct DraftOpenItem: Codable, Identifiable {
+    var saved_matches: [SavedRow] = []
+    var matched_saved_id: String?
+    var id: String
+    var equipment: String
+    var location: String
+    var action: String
+    var source_quote: String
+}
+struct DraftFact: Codable, Identifiable {
+    var id: String { field }
+    var field: String
+    var value: String
+    var source_quote: String
+}
+struct TranscriptDraft: Codable {
+    var attendees: [DraftPerson] = []
+    var open_items: [DraftOpenItem] = []
+    var facts: [DraftFact] = []
+    var warnings: [String] = []
+}
+struct TranscriptDraftResponse: Decodable { var draft: TranscriptDraft }
+
+extension Inspection {
+    mutating func applyTranscriptDraft(_ draft: TranscriptDraft) {
+        for fact in draft.facts where !fact.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            switch fact.field {
+            case "project": if project.isEmpty { project = String(fact.value.prefix(200)) }
+            case "client": if (client ?? "").isEmpty { client = fact.value }
+            case "address": if (address ?? "").isEmpty { address = fact.value }
+            case "requested_by": if (requested_by ?? "").isEmpty { requested_by = fact.value }
+            case "request_date": if (request_date ?? "").isEmpty { request_date = fact.value }
+            // The existing inspection date is intentionally preserved.
+            default: break
+            }
+        }
+        for person in draft.attendees where ![person.name,person.company,person.title].allSatisfy({ $0.isEmpty }) {
+            var people = sharedAttendees
+            let index = people.firstIndex { row in
+                (!person.name.isEmpty && row.name.localizedCaseInsensitiveCompare(person.name) == .orderedSame) ||
+                (row.name.isEmpty && !person.company.isEmpty && row.company == person.company && row.title == person.title)
+            }
+            if let index {
+                if people[index].name.isEmpty { people[index].name = person.name }
+                if people[index].company.isEmpty { people[index].company = person.company }
+                if people[index].title.isEmpty { people[index].title = person.title }
+                sharedAttendees = people
+            } else { insertAttendee(Attendee(name: person.name, company: person.company, title: person.title)) }
+        }
+        for item in draft.open_items where ["SF","SH","OT"].contains(item.equipment) && (!item.location.isEmpty || !item.action.isEmpty) {
+            if !reports.contains(where: { $0.equipment == item.equipment }) {
+                var report = ReportDraft(equipment: item.equipment)
+                report.project = project; report.inspection_date = inspection_date; report.attendees = sharedAttendees
+                report.client = client ?? ""; report.address = address ?? ""; report.request_date = request_date ?? ""
+                report.requested_by = requested_by ?? ""; report.subject_project = subject_project ?? ""
+                calendar_candidates?.fill(&report, inspection: self, selectedTitle: "")
+                reports.append(report)
+            }
+            if let index = reports.firstIndex(where: { $0.equipment == item.equipment }),
+               !reports[index].open_items.contains(where: { $0.location == item.location && $0.action == item.action }) {
+                reports[index].open_items.append(Finding(location: item.location, action: item.action))
+                reports[index].status = "OIs"; reports[index].calendar_title = ""; reports[index].stamp_requested = false
+            }
+        }
+        refreshTitle(force: true)
+    }
+}
