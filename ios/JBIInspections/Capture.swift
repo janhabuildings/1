@@ -221,6 +221,127 @@ private struct CameraPreview: UIViewRepresentable {
     }
 }
 
+// Live dictation is text-only: it does not create an audio evidence file.
+@MainActor final class LiveDictation: ObservableObject {
+    @Published private(set) var busy = false
+    @Published private(set) var listening = false
+    @Published private(set) var message = ""
+    private var engine: AVAudioEngine?
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var recognizer: SFSpeechRecognizer?
+    private var timeout: Timer?
+    private var identity = UUID()
+    private var update: ((String) -> Void)?
+    private var ownsSession = false
+    private var tapInstalled = false
+
+    func start(allowNetwork: Bool, update: @escaping (String) -> Void) async {
+        guard !busy else { return }
+        busy = true; message = "Requesting speech and microphone access…"
+        let id = UUID(); identity = id
+        self.update = update
+        do {
+            let speech = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+            }
+            guard identity == id else { return }
+            guard speech == .authorized else {
+                throw APIError(message: "Enable Speech Recognition for JBI Inspections in iPhone Settings → Privacy & Security.")
+            }
+            let microphone = await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
+            }
+            guard identity == id else { return }
+            guard microphone else { throw APIError(message: "Enable microphone access for JBI Inspections in iPhone Settings.") }
+            guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")), recognizer.isAvailable else {
+                throw APIError(message: "English speech recognition is unavailable. Check Dictation settings and try again.")
+            }
+            guard allowNetwork || recognizer.supportsOnDeviceRecognition else {
+                throw APIError(message: "On-device English recognition is unavailable. Enable English Dictation in Settings, or explicitly choose Apple speech service.")
+            }
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth])
+            try session.setActive(true)
+            ownsSession = true
+            let engine = AVAudioEngine()
+            self.engine = engine
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.requiresOnDeviceRecognition = !allowNetwork
+            request.shouldReportPartialResults = true
+            request.taskHint = .dictation
+            self.request = request; self.recognizer = recognizer
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0 && format.channelCount > 0 else {
+                throw APIError(message: "No microphone input is available. Check the connected audio device.")
+            }
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in request.append(buffer) }
+            tapInstalled = true
+            // engine is retained until the microphone tap has been removed.
+            engine.prepare()
+            try engine.start()
+            listening = true; message = "Listening… Words appear in Transcript below."
+            task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                Task { @MainActor in
+                    guard let self, self.identity == id else { return }
+                    if let result { self.update?(result.bestTranscription.formattedString) }
+                    if let result, result.isFinal {
+                        self.finish(message: "Live transcription saved. Review and edit the text.")
+                    } else if let error {
+                        self.finish(message: "Dictation stopped: " + error.localizedDescription + " Any words already shown have been kept.")
+                    }
+                }
+            }
+            timeout = Timer.scheduledTimer(withTimeInterval: 55, repeats: false) { [weak self] _ in
+                Task { @MainActor in guard self?.identity == id else { return }; self?.stop() }
+            }
+        } catch {
+            guard identity == id else { return }
+            finish(message: error.localizedDescription)
+        }
+    }
+    func stop() {
+        guard busy else { return }
+        guard listening else { cancel(); return }
+        stopMicrophone()
+        request?.endAudio()
+        message = "Finishing transcription…"
+        timeout?.invalidate()
+        let id = identity
+        timeout = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard self?.identity == id else { return }
+                self?.finish(message: "Live transcription saved. Review and edit the text; tap Start for another segment.")
+            }
+        }
+    }
+    func cancel() {
+        guard busy else { return }
+        finish(message: "Dictation stopped. Any words already shown have been kept.")
+    }
+    private func stopMicrophone() {
+        if let engine {
+            engine.stop()
+            if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }
+            self.engine = nil
+        }
+        listening = false
+        if ownsSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            ownsSession = false
+        }
+    }
+    private func finish(message: String) {
+        identity = UUID()
+        stopMicrophone()
+        request?.endAudio(); task?.cancel()
+        request = nil; task = nil; recognizer = nil; update = nil
+        timeout?.invalidate(); timeout = nil
+        busy = false; self.message = message
+    }
+}
+
 struct ShareSheet: UIViewControllerRepresentable {
     var items: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
