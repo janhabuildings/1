@@ -35,6 +35,7 @@ function showTranscriptDraft(draft,inspectionID){
   const cancel=el('button','Discard draft','secondary');cancel.onclick=()=>root.replaceChildren();root.append(apply,cancel);refreshApply();
 }
 document.addEventListener('DOMContentLoaded',()=>{
+$('import-saved-rows').onclick=()=>action(async()=>{const result=await json('/saved-rows/import-history',{method:'POST'});await refreshSavedRows();toast(`Imported ${result.attendees_added} attendee rows and ${result.open_items_added} open-item rows from ${result.inspections} inspections. Duplicates skipped: ${result.duplicates}.`+(result.limit_skipped?` ${result.limit_skipped} rows exceeded the library limit.`:''));});
 $('refresh-saved-rows').onclick=()=>action(refreshSavedRows);
 $('transcript-analyze').onclick=()=>action(async()=>{if(!$('transcript-ai-consent').checked)throw new Error('Allow transcript sharing before using AI.');if(!$('transcript').value.trim())throw new Error('Enter or transcribe speech first.');await save();const id=state.id;const result=await json('/inspections/'+encodeURIComponent(id)+'/transcript-draft',{method:'POST',json:{consent:true}});showTranscriptDraft(result.draft,id);});
 

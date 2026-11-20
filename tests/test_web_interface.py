@@ -933,3 +933,19 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.evaluate('state.reports[0].status'),'OIs')
         self.assertFalse(self.page.evaluate('state.reports[0].stamp_requested'))
         self.assertEqual(self.errors,[])
+
+    def test_import_from_saved_reports_populates_suggestions_without_duplicates(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.evaluate("""async()=>{await json('/inspections',{method:'POST',json:{title:'Older report',inspection_date:'2026-11-20',attendees:[{name:'Jane Smith',company:'ACME',title:'Safety Inspector'}],reports:[{equipment:'SH',attendees:[{name:'Report engineer',company:'DSENY',title:'PE'}],attendees_override:true,open_items:[{location:'North',action:'Replace panel'}]}]}});}""")
+        self.page.get_by_text('Saved rows · attendees and open items',exact=True).click()
+        self.page.locator('#import-saved-rows').click()
+        expect(self.page.locator('#status')).to_contain_text('Imported 2 attendee rows and 1 open-item rows')
+        self.page.locator('#import-saved-rows').click()
+        expect(self.page.locator('#status')).to_contain_text('Imported 0 attendee rows and 0 open-item rows')
+        self.page.locator('#add-attendee').click()
+        self.page.locator('#attendees').get_by_placeholder('Name',exact=True).fill('Jan')
+        self.page.get_by_role('button',name='Use saved: Jane Smith · ACME · Safety Inspector',exact=True).click()
+        self.assertEqual(self.page.evaluate('state.attendees[0].company'),'ACME')
+        self.assertEqual(self.page.evaluate('state.attendees[0].title'),'Safety Inspector')
+        self.assertEqual(self.errors,[])

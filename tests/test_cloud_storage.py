@@ -90,6 +90,19 @@ class DurableStorage(unittest.TestCase):
             self.assertEqual(client.get('/capabilities',headers=HEADERS).json()['storage'],'cloudflare')
             self.assertEqual(client.get('/inspections',headers={}).status_code,401)
 
+    def test_legacy_cloud_history_imports_once_and_deletions_survive_restore(self):
+        with TestClient(self.app('legacy-history')) as client:
+            identity,response=self.save(client);self.assertEqual(response.status_code,200)
+        # Simulate records saved before the import migration existed.
+        self.gateway.rows.pop('app_migrations:saved-row-history-v1')
+        with TestClient(self.app('import-history')) as client:
+            rows=client.get('/saved-rows',headers=HEADERS).json()
+            self.assertEqual(len(rows),1);self.assertEqual(rows[0]['name'],'Inspector draft')
+            client.delete('/saved-rows/'+rows[0]['id'],headers=HEADERS)
+        with TestClient(self.app('after-history-delete')) as client:
+            self.assertEqual(client.get('/saved-rows',headers=HEADERS).json(),[])
+            self.assertEqual(client.get('/inspections/'+identity,headers=HEADERS).json()['attendees'][0]['name'],'Inspector draft')
+
     def test_saved_row_library_survives_fresh_server_and_deletion(self):
         with TestClient(self.app('rows-first')) as client:
             row=client.post('/saved-rows',headers=HEADERS,json={'kind':'open_item','equipment':'SH','location':'North','action':'Replace panel'}).json()

@@ -41,6 +41,7 @@ class Store:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS inspections(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS saved_rows(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS app_migrations(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY, inspection_id TEXT NOT NULL, kind TEXT NOT NULL,
               mime TEXT NOT NULL, filename TEXT NOT NULL, path TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
               equipment TEXT NOT NULL DEFAULT '', FOREIGN KEY(inspection_id) REFERENCES inspections(id));
