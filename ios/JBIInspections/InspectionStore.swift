@@ -22,8 +22,14 @@ import Foundation
         } catch { self.error = "Local storage: \(error.localizedDescription)" }
     }
     var api: API { API(baseURL: UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL, token: SecureToken.read()) }
+    var companyNames: [String] { (cache.savedRows ?? []).filter { $0.kind == "company" }.map(\.company) }
+    func saveCompanyNames(_ value: String) {
+        for name in Set(value.components(separatedBy: CharacterSet(charactersIn: ";\n")).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }) {
+            saveSuggestion(SavedRow(kind: "company", company: name))
+        }
+    }
     func saveSuggestion(_ row: SavedRow) {
-        guard !(row.kind == "attendee" ? [row.name,row.company,row.title] : [row.location,row.action]).allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return }
+        guard !(row.kind == "company" ? [row.company] : row.kind == "attendee" ? [row.name,row.company,row.title] : [row.location,row.action]).allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return }
         var rows = cache.savedRows ?? []
         if rows.contains(where: { $0.summary.caseInsensitiveCompare(row.summary) == .orderedSame && $0.kind == row.kind }) { libraryNotice = "This row is already saved."; return }
         rows.insert(row, at: 0); cache.savedRows = rows

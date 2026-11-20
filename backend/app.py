@@ -95,7 +95,7 @@ class AnalyzeInput(BaseModel):
 
 class SavedRowInput(BaseModel):
     id: str = Field(default_factory=uid, pattern=r'^[A-Za-z0-9-]{1,80}$')
-    kind: Literal['attendee','open_item']
+    kind: Literal['attendee','open_item','company']
     equipment: Literal['','SF','SH','OT'] = ''
     name: str = Field(default='',max_length=300)
     company: str = Field(default='',max_length=300)
@@ -200,9 +200,11 @@ def create_app(settings=None):
         cloud.restore()
         templates=TemplateManager(store)
         store.cloud=cloud
-    from backend.saved_row_history import import_history
+    from backend.saved_row_history import import_history,seed_companies
     history_import=import_history(store,once=True)
     if history_import is not None:print('Saved-row history import: '+json.dumps(history_import),flush=True)
+    company_import=seed_companies(store,once=True)
+    if company_import is not None:print('Company value import: '+json.dumps(company_import),flush=True)
     if cloud:cloud.sync()
     storage_lock=asyncio.Lock()
     app=FastAPI(title='JBI Inspections',version='0.1.0',docs_url=None,redoc_url=None)
@@ -268,14 +270,16 @@ def create_app(settings=None):
     @app.post('/saved-rows',dependencies=[Depends(authorized)])
     def save_row(data:SavedRowInput):
         row=data.model_dump()
-        keys=('name','company','title') if data.kind=='attendee' else ('location','action')
+        keys={'attendee':('name','company','title'),'open_item':('location','action'),'company':('company',)}[data.kind]
+        if data.kind=='company':
+            for key in ('name','title','location','action','equipment'):row[key]=''
         for key in keys:row[key]=row[key].strip()
         if not any(row[key] for key in keys):raise HTTPException(422,'Enter at least one value before saving this row')
         with store.connect() as db:
             existing=db.execute('SELECT id,payload FROM saved_rows').fetchall()
             for item in existing:
                 value=json.loads(item['payload'])
-                if value['kind']==row['kind'] and value['equipment']==row['equipment'] and all(value[key].casefold()==row[key].casefold() for key in keys):
+                if value['kind']==row['kind'] and value['equipment']==row['equipment'] and all(' '.join(value[key].split()).casefold()==' '.join(row[key].split()).casefold() for key in keys):
                     row['id']=item['id'];break
             if len(existing)>=1000 and not any(item['id']==row['id'] for item in existing):raise HTTPException(422,'Saved row limit reached; delete unused entries first')
             db.execute('INSERT INTO saved_rows VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(row['id'],json.dumps(row)))
@@ -283,7 +287,9 @@ def create_app(settings=None):
 
     @app.post('/saved-rows/import-history',dependencies=[Depends(authorized)])
     def import_saved_rows():
-        return import_history(store)
+        result=import_history(store)
+        result['companies_added']=seed_companies(store)['companies_added']
+        return result
 
     @app.delete('/saved-rows/{identity}',dependencies=[Depends(authorized)])
     def delete_saved_row(identity:str):

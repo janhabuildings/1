@@ -307,7 +307,7 @@ struct SavedRow: Codable, Equatable, Identifiable {
     var title = ""
     var location = ""
     var action = ""
-    var summary: String { (kind == "attendee" ? [name, company, title] : [equipment, location, action]).filter { !$0.isEmpty }.joined(separator: " · ") }
+    var summary: String { (kind == "company" ? [company] : kind == "attendee" ? [name, company, title] : [equipment, location, action]).filter { !$0.isEmpty }.joined(separator: " · ") }
     func value(_ key: String) -> String {
         switch key { case "name": return name; case "company": return company; case "title": return title; case "location": return location; default: return action }
     }

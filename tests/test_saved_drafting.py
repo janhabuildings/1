@@ -44,3 +44,13 @@ class SavedDrafting(unittest.TestCase):
         saved=self.save(kind='open_item',equipment='SH',location='North',action='Replace warped panel')
         result=self.analyze('Replace warped panel.',{'open_items':[{'equipment':'unknown','action':'Replace warped panel','source_quote':'Replace warped panel'},{'equipment':'SF','action':'Replace warped panel','source_quote':'Replace warped panel'}]})
         first,other=result['open_items'];self.assertEqual(first['matched_saved_id'],saved['id']);self.assertEqual(first['equipment'],'SH');self.assertEqual(first['location'],'North');self.assertEqual(other['saved_matches'],[])
+
+    def test_company_values_are_separate_and_do_not_store_linked_attendee_cells(self):
+        attendee=self.save(kind='attendee',name='Jane Smith',company='ACME',title='Safety Inspector')
+        self.assertEqual([row['kind'] for row in self.client.get('/saved-rows',headers=self.headers).json()],['attendee'])
+        company=self.save(kind='company',company='ACME',name='Must not be retained',title='PE',equipment='SH',action='Ignore')
+        self.assertNotEqual(company['id'],attendee['id'])
+        for key in ('name','title','equipment','location','action'):self.assertEqual(company[key],'')
+        duplicate=self.save(kind='company',company=' acme ');self.assertEqual(company['id'],duplicate['id'])
+        self.client.delete('/saved-rows/'+company['id'],headers=self.headers)
+        self.assertEqual(self.client.get('/saved-rows',headers=self.headers).json(),[attendee])

@@ -142,7 +142,7 @@ function renderAttendees(skipRoot=null){
   if(engineer>=0)state.attendees.push(...state.attendees.splice(engineer,1));
   const picker=$('capture-attendee'),selected=picker.value;picker.replaceChildren(el('option','No attendee / new person'));picker.firstChild.value='';
   for(const person of state.attendees){const option=el('option',person.name||person.company+' · '+person.title);option.value=person.id;picker.append(option);}picker.value=selected;
-  $('capture-companies').replaceChildren(...[...new Set([...attendeeCompanies,$('client').value].filter(Boolean))].map(value=>{const option=el('option');option.value=value;return option;}));
+  $('capture-companies').replaceChildren(...[...new Set([...attendeeCompanies,...companyNames(),$('client').value].filter(Boolean))].map(value=>{const option=el('option');option.value=value;return option;}));
   if($('capture-role').options.length===1)for(const role of attendeeRoles){const option=el('option',role);option.value=role;$('capture-role').append(option);}
   for(const report of state.reports)if(!report.attendees_override)report.attendees=structuredClone(state.attendees);
   document.querySelectorAll('[data-report-attendees]').forEach(node=>{const report=state.reports.find(row=>row.equipment===node.dataset.reportAttendees);node.querySelector('summary').textContent='Attendees · '+(report?.attendees?.length||0);const notice=node.querySelector('[data-attendee-notice]');if(notice)notice.textContent=report?.attendees_override?'Edited for this report only. Reset to use the current inspection list.':'Filled from the inspection. Editing creates a list for this report only.';});
@@ -157,10 +157,10 @@ function renderAttendeeRows(root){
   people.forEach((person,index)=>{
     const row=el('div',undefined,'row attendee-row');
     const name=field('Name',person.name,value=>update(person,'name',value));name.classList.add('attendee-name');name.querySelector('input').placeholder='Name';row.append(name);
-    const company=siteChoice('Company / agency',person.company,value=>update(person,'company',value),[...new Set([...attendeeCompanies,$('client').value].filter(Boolean))]);const role=siteChoice('Role',person.title,value=>update(person,'title',value),attendeeRoles);
+    const company=siteChoice('Company / agency',person.company,value=>update(person,'company',value),[...new Set([...attendeeCompanies,...companyNames(),$('client').value].filter(Boolean))]);const role=siteChoice('Role',person.title,value=>update(person,'title',value),attendeeRoles);
     const apply=saved=>{for(const key of ['name','company','title'])if(saved[key])person[key]=saved[key];if(report)report.attendees_override=true;renderAttendees();markDirty();};
     attachSavedRows(name,'attendee','name','',apply);attachSavedRows(company,'attendee','company','',apply);attachSavedRows(role,'attendee','title','',apply);row.append(company,role);
-    const saveRow=el('button','Save row','secondary saved-row-save');saveRow.type='button';saveRow.onclick=()=>action(()=>saveReusableRow({kind:'attendee',name:person.name,company:person.company,title:person.title}));row.append(saveRow);
+    const saveRow=el('button','Save row','secondary saved-row-save');saveRow.type='button';saveRow.onclick=()=>action(()=>saveReusableRow({kind:'attendee',name:person.name,company:person.company,title:person.title}));const saves=el('div',undefined,'saved-row-save');saveRow.classList.remove('saved-row-save');const saveCompany=el('button','Save company name','secondary');saveCompany.type='button';saveCompany.onclick=()=>action(()=>saveCompanyNames(person.company));saves.append(saveRow,saveCompany);row.append(saves);
     const remove=removeButton('Remove attendee');remove.onclick=()=>{people.splice(index,1);if(report)report.attendees_override=true;renderAttendees();markDirty();};row.append(remove);root.append(row);
   });
 }
