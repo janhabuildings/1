@@ -313,11 +313,20 @@ def create_app(settings=None):
             for row in draft[key]:
                 if row['source_quote'] not in text:
                     draft['warnings'].append('An unsupported suggestion was removed because its source quotation was not found.');continue
-                if key=='facts' and row['field'].endswith('_date'):
-                    try:date.fromisoformat(row['value'])
-                    except ValueError:continue
+                if key=='facts':
+                    limits={'project':200,'client':1000,'address':2000,'requested_by':1000,'request_date':10,'inspection_date':10}
+                    if len(row['value'])>limits[row['field']]:
+                        draft['warnings'].append('An extracted value exceeded its field limit; enter it manually.');continue
+                    if row['field'].endswith('_date'):
+                        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}',row['value']):continue
+                        try:date.fromisoformat(row['value'])
+                        except ValueError:continue
                 supported.append(row)
             draft[key]=supported
+        repeated={row['field'] for row in draft['facts'] if sum(item['field']==row['field'] for item in draft['facts'])>1}
+        if repeated:
+            draft['facts']=[row for row in draft['facts'] if row['field'] not in repeated]
+            draft['warnings'].append('Conflicting or repeated common facts require manual entry: '+', '.join(sorted(repeated)))
         from difflib import SequenceMatcher
         def normalized(value):return ' '.join(re.findall(r'\w+',value.casefold()))
         with store.connect() as db:library=[json.loads(row['payload']) for row in db.execute('SELECT payload FROM saved_rows')]

@@ -379,9 +379,10 @@ extension Inspection {
                 calendar_candidates?.fill(&report, inspection: self, selectedTitle: "")
                 reports.append(report)
             }
-            if let index = reports.firstIndex(where: { $0.equipment == item.equipment }),
-               !reports[index].open_items.contains(where: { $0.location == item.location && $0.action == item.action }) {
-                reports[index].open_items.append(Finding(location: item.location, action: item.action))
+            if let index = reports.firstIndex(where: { $0.equipment == item.equipment }) {
+                if !reports[index].open_items.contains(where: { $0.location == item.location && $0.action == item.action }) {
+                    reports[index].open_items.append(Finding(location: item.location, action: item.action))
+                }
                 reports[index].status = "OIs"; reports[index].calendar_title = ""; reports[index].stamp_requested = false
             }
         }

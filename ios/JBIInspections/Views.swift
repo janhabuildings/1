@@ -177,7 +177,7 @@ struct InspectionDetail: View {
                 Button(dictation.busy ? "Stop live transcription" : "Start live transcription",
                        systemImage: dictation.busy ? "stop.circle.fill" : "mic") {
                     if dictation.busy { dictation.stop() } else { liveConsent = true }
-                }.disabled(audio.recording || audio.transcribing)
+                }.disabled(audio.recording || audio.transcribing || busy)
                 if !dictation.message.isEmpty {
                     Text(dictation.message).font(.caption).foregroundStyle(.secondary)
                 }
@@ -185,11 +185,12 @@ struct InspectionDetail: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Review and correct transcriptions. They do not automatically become inspection findings.").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $inspection.transcript).frame(minHeight: 120).accessibilityLabel("Conversation transcript")
-                    .disabled(dictation.busy)
+                    .disabled(dictation.busy || busy)
                 Button("Analyze transcript and fill draft", systemImage: "sparkles") { transcriptConsent = true }
                     .disabled(busy || dictation.busy || inspection.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.connected)
                 TextEditor(text: $inspection.notes).frame(minHeight: 100).accessibilityLabel("Inspector notes")
                 NavigationLink("Saved rows · attendees and open items") { SavedRowLibrary() }
+                if !store.libraryNotice.isEmpty { Text(store.libraryNotice).font(.caption).foregroundStyle(.secondary) }
             }
             reports
             Section("References") {

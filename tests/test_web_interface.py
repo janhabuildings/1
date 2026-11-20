@@ -888,3 +888,48 @@ class WebWorkflow(unittest.TestCase):
         for axis in ['height','width']:self.assertLess(abs(left[axis]-right[axis]),2)
         self.assertTrue(self.page.evaluate('() => document.documentElement.scrollWidth <= innerWidth'))
         self.assertEqual(self.errors,[])
+
+    def test_saved_rows_fill_related_cells_and_remain_editable(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.evaluate("async()=>{await json('/saved-rows',{method:'POST',json:{kind:'attendee',name:'Jane Smith',company:'ACME',title:'Safety Inspector'}});await json('/saved-rows',{method:'POST',json:{kind:'open_item',equipment:'SH',location:'North elevation',action:'Replace warped panel'}});await refreshSavedRows();}")
+        self.page.locator('#add-attendee').click()
+        name=self.page.locator('#attendees').get_by_placeholder('Name',exact=True);name.fill('Jan')
+        self.page.get_by_role('button',name='Use saved: Jane Smith · ACME · Safety Inspector',exact=True).click()
+        expect(name).to_have_value('Jane Smith')
+        self.assertEqual(self.page.evaluate('state.attendees[0].company'),'ACME')
+        self.assertEqual(self.page.evaluate('state.attendees[0].title'),'Safety Inspector')
+        name.fill('Jane Smith edited')
+        self.page.locator('#attendees').get_by_role('button',name='Save row',exact=True).click()
+        expect(self.page.locator('#status')).to_have_text('Row saved for reuse across inspections.')
+        self.page.locator('[data-tab=reports]').click();self.page.locator('#add-SH').click()
+        self.page.get_by_label('Outcome for custom title',exact=True).select_option('OIs')
+        self.page.get_by_role('button',name='+ Add open item',exact=True).click()
+        action=self.page.get_by_label('Corrective action',exact=True);action.fill('warped')
+        self.page.get_by_role('button',name='Use saved: SH · North elevation · Replace warped panel',exact=True).click()
+        expect(self.page.get_by_label('Location / occurrence',exact=True)).to_have_value('North elevation')
+        expect(action).to_have_value('Replace warped panel')
+        action.fill('Replace warped panel and inspect connections')
+        self.page.locator('#save').click();expect(self.page.locator('#save-state')).to_contain_text('Saved')
+        record=self.app.state.store.list()[0];self.assertEqual(record['reports'][0]['open_items'][0]['action'],'Replace warped panel and inspect connections')
+        self.assertEqual(self.errors,[])
+
+    def test_transcript_review_edits_before_apply_and_preserves_existing_facts(self):
+        from playwright.sync_api import expect
+        import json
+        self.connect();self.page.locator('#project').fill('Reviewed project');self.page.locator('#transcript').fill('Jane observed a warped panel.')
+        draft={'attendees':[{'id':'p','name':'Jane','company':'ACME','title':'Safety Inspector','source_quote':'Jane','saved_matches':[]}],
+               'open_items':[{'id':'f','equipment':'unknown','location':'North','action':'Replace panel','source_quote':'warped panel','saved_matches':[]}],
+               'facts':[{'field':'project','value':'AI project','source_quote':'Jane'}],'warnings':[]}
+        self.page.route('**/transcript-draft',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps({'draft':draft,'applied_to_report':False})))
+        self.page.locator('#transcript-ai-consent').check();self.page.locator('#transcript-analyze').click()
+        root=self.page.locator('#transcript-draft');apply=root.get_by_role('button',name='Apply reviewed draft',exact=True)
+        expect(apply).to_be_disabled();root.get_by_label('Equipment',exact=True).select_option('SH')
+        root.get_by_label('Corrective action',exact=True).fill('Replace panel after review')
+        expect(apply).to_be_enabled();apply.click()
+        expect(self.page.locator('#project')).to_have_value('Reviewed project')
+        self.assertEqual(self.page.evaluate('state.attendees[0].name'),'Jane')
+        self.assertEqual(self.page.evaluate('state.reports[0].open_items[0].action'),'Replace panel after review')
+        self.assertEqual(self.page.evaluate('state.reports[0].status'),'OIs')
+        self.assertFalse(self.page.evaluate('state.reports[0].stamp_requested'))
+        self.assertEqual(self.errors,[])
