@@ -296,6 +296,16 @@ def create_app(settings=None):
         with store.connect() as db:db.execute('DELETE FROM saved_rows WHERE id=?',(identity,))
         return {'deleted':True}
 
+    @app.post('/inspections/{identity}/transcript-draft/rules',dependencies=[Depends(authorized)])
+    def coded_transcript_draft(identity:str):
+        from backend.transcript_rules import extract
+        inspection=store.get(identity)
+        text=inspection.get('transcript','').strip()
+        if not text:raise HTTPException(422,'Enter or transcribe speech first')
+        with store.connect() as db:library=[json.loads(row['payload']) for row in db.execute('SELECT payload FROM saved_rows')]
+        draft=TranscriptDraft.model_validate(extract(text,library)).model_dump()
+        return {'draft':draft,'method':'rules','applied_to_report':False}
+
     @app.post('/inspections/{identity}/transcript-draft',dependencies=[Depends(authorized)])
     async def transcript_draft(identity:str,data:AnalyzeInput):
         inspection=store.get(identity)

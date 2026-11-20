@@ -186,7 +186,13 @@ struct InspectionDetail: View {
                 Text("Review and correct transcriptions. They do not automatically become inspection findings.").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $inspection.transcript).frame(minHeight: 120).accessibilityLabel("Conversation transcript")
                     .disabled(dictation.busy || busy)
-                Button("Analyze transcript and fill draft", systemImage: "sparkles") { transcriptConsent = true }
+                Button("Build draft (no AI)", systemImage: "text.badge.checkmark") {
+                    buildCodedTranscriptDraft()
+                }.disabled(busy || dictation.busy || inspection.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                DisclosureGroup("Examples for coded extraction") {
+                    Text("Use labeled phrases separated by sentences or new lines: Attendee: John Smith. Company: ABC. Role: Site Supervisor. Equipment: Scaffold. Location: North. Action: Install missing pins. Use YYYY-MM-DD for dates. Coded extraction works on this phone without an AI connection.").font(.caption)
+                }
+                Button("Use AI for unstructured notes (optional)", systemImage: "sparkles") { transcriptConsent = true }
                     .disabled(busy || dictation.busy || inspection.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.connected)
                 TextEditor(text: $inspection.notes).frame(minHeight: 100).accessibilityLabel("Inspector notes")
                 NavigationLink("Saved rows · attendees and open items") { SavedRowLibrary() }
@@ -771,6 +777,15 @@ struct InspectionDetail: View {
         store.save(inspection)
         scheduleSync()
     }
+    private func buildCodedTranscriptDraft() {
+        guard !busy else { return }
+        let text = inspection.transcript, library = store.cache.savedRows ?? []
+        Task {
+            busy = true; defer { busy = false }
+            transcriptDraft = await Task.detached(priority: .userInitiated) { CodedTranscript.extract(text, library: library) }.value
+            showTranscriptDraft = true
+        }
+    }
     private func analyzeTranscript() {
         guard !busy else { return }
         Task {
@@ -935,7 +950,7 @@ struct TranscriptDraftReview: View {
             }.navigationTitle("Review transcript draft")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Apply draft") { apply() }.disabled(draft.open_items.contains { $0.equipment == "unknown" }) }
+                ToolbarItem(placement: .confirmationAction) { Button("Apply draft") { apply() }.disabled((draft.attendees.isEmpty && draft.open_items.isEmpty && draft.facts.isEmpty) || draft.open_items.contains { $0.equipment == "unknown" }) }
                 ToolbarItem(placement: .primaryAction) { EditButton() }
             }
         }
