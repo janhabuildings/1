@@ -433,7 +433,7 @@ struct InspectionDetail: View {
                 if audio.recording { finishRecording() } else { recordConsent = true }
             }.foregroundStyle(audio.recording ? Color.red : Color.accentColor).disabled(dictation.busy)
             if audio.recording { Label("Recording in progress", systemImage: "waveform").foregroundStyle(.red) }
-            Button("Import audio or a transcript", systemImage: "square.and.arrow.down") { importFile = true }
+            Button("Import audio or a transcript", systemImage: "square.and.arrow.down") { importFile = true }.disabled(dictation.busy)
         }
     }
     private var attendeeBinding: Binding<[Attendee]> {
