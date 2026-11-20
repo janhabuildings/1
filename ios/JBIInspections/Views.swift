@@ -122,6 +122,8 @@ struct InspectionDetail: View {
     @EnvironmentObject var store: InspectionStore
     @State var inspection: Inspection
     @StateObject private var audio = AudioCapture()
+    @StateObject private var dictation = LiveDictation()
+    @State private var liveConsent = false
     @Environment(\.scenePhase) private var phase
     @State private var camera = false
     @State private var calendarExpanded = false
@@ -169,8 +171,18 @@ struct InspectionDetail: View {
             capture
             media
             Section("Transcript and field notes") {
+                Button(dictation.busy ? "Stop live transcription" : "Start live transcription",
+                       systemImage: dictation.busy ? "stop.circle.fill" : "mic") {
+                    if dictation.busy { dictation.stop() } else { liveConsent = true }
+                }.disabled(audio.recording || audio.transcribing)
+                if !dictation.message.isEmpty {
+                    Text(dictation.message).font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Speak in segments of up to 55 seconds. Live dictation saves text, not an audio recording.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("Review and correct transcriptions. They do not automatically become inspection findings.").font(.caption).foregroundStyle(.secondary)
                 TextEditor(text: $inspection.transcript).frame(minHeight: 120).accessibilityLabel("Conversation transcript")
+                    .disabled(dictation.busy)
                 TextEditor(text: $inspection.notes).frame(minHeight: 100).accessibilityLabel("Inspector notes")
             }
             reports
@@ -246,8 +258,12 @@ struct InspectionDetail: View {
     }
     private var captureScreen: some View {
         editingScreen
-        .onChange(of: phase) { _, value in if value != .active { finishRecording() } }
-        .onDisappear { finishRecording() }
+        .onChange(of: phase) { _, value in
+            if value != .active { finishRecording() }
+            if value == .background { dictation.cancel() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in dictation.cancel() }
+        .onDisappear { finishRecording(); dictation.cancel() }
         .onChange(of: photoSelection) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -289,6 +305,13 @@ struct InspectionDetail: View {
             }
             Button("Cancel", role: .cancel) { transcriptionID = nil }
         } message: { Text("On-device transcription keeps audio on your phone. Allow Apple speech service may send this recording to Apple and requires internet access.") }
+        .confirmationDialog("Live transcription", isPresented: $liveConsent, titleVisibility: .visible) {
+            Button("Start on this device") { startLiveDictation(allowNetwork: false) }
+            Button("Allow Apple speech service") { startLiveDictation(allowNetwork: true) }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Inform everyone before transcribing their speech. On-device recognition keeps audio on this phone. Apple speech service may send microphone audio to Apple and requires internet access.")
+        }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
         .quickLookPreview($reportPreviewURL)
         .sheet(item: $mail) { MailDraft(subject: $0.subject, html: $0.html, attachments: $0.attachments, sender: $0.sender, to: $0.to, cc: $0.cc) }
@@ -397,6 +420,7 @@ struct InspectionDetail: View {
     private var capture: some View {
         Section("Capture") {
             Button("Open camera · photo or video", systemImage: "camera") {
+                dictation.cancel()
                 finishRecording()
                 guard AVCaptureDevice.default(for: .video) != nil else { store.error = "A physical iPhone camera is required."; return }
                 AVCaptureDevice.requestAccess(for: .video) { granted in
@@ -407,7 +431,7 @@ struct InspectionDetail: View {
             Text("Capture photos or video with sound. Add details after each capture, then continue until you return to the inspection.").font(.caption).foregroundStyle(.secondary)
             Button(audio.recording ? "Stop recording" : "Record on-site conversation", systemImage: audio.recording ? "stop.circle.fill" : "mic") {
                 if audio.recording { finishRecording() } else { recordConsent = true }
-            }.foregroundStyle(audio.recording ? Color.red : Color.accentColor)
+            }.foregroundStyle(audio.recording ? Color.red : Color.accentColor).disabled(dictation.busy)
             if audio.recording { Label("Recording in progress", systemImage: "waveform").foregroundStyle(.red) }
             Button("Import audio or a transcript", systemImage: "square.and.arrow.down") { importFile = true }
         }
@@ -421,7 +445,19 @@ struct InspectionDetail: View {
             Text("Review the preset rows and enter the people who attended. This list is used in every report.").font(.caption).foregroundStyle(.secondary)
         }
     }
+    private func startLiveDictation(allowNetwork: Bool) {
+        guard !audio.recording && !audio.transcribing else { return }
+        let original = inspection.transcript
+        Task {
+            await dictation.start(allowNetwork: allowNetwork) { text in
+                guard !text.isEmpty else { return }
+                inspection.transcript = original + (original.isEmpty ? "" : "\n\n") + text
+                store.save(inspection); scheduleSync()
+            }
+        }
+    }
     private func transcribeMedia(_ id: String, allowNetwork: Bool) {
+        guard !dictation.busy else { return }
         guard let item = store.cache.media.first(where: { $0.id == id }) else { return }
         transcriptionMessage = "Transcribing recording…"
         Task {
@@ -487,7 +523,7 @@ struct InspectionDetail: View {
                     HStack {
                         Button("Share") { share = SharedItems(items: [store.mediaURL(item)]) }.buttonStyle(.borderless)
                         if item.kind == "audio" {
-                            Button(audio.transcribing ? "Transcribing…" : "Transcribe recording") { transcriptionID = item.id }.disabled(audio.transcribing).buttonStyle(.borderless)
+                            Button(audio.transcribing ? "Transcribing…" : "Transcribe recording") { transcriptionID = item.id }.disabled(audio.transcribing || dictation.busy).buttonStyle(.borderless)
                             if !transcriptionMessage.isEmpty { Text(transcriptionMessage).font(.caption) }
                         }
                     }
