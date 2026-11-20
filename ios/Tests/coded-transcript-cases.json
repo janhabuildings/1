@@ -421,5 +421,24 @@
     "attendees": [],
     "open_items": [],
     "facts": []
+  },
+  {
+    "name": "location alone never invents saved corrective action",
+    "text": "Equipment: Shed. Location: North elevation.",
+    "library": [
+      {
+        "id": "panel",
+        "kind": "open_item",
+        "equipment": "SH",
+        "name": "",
+        "company": "",
+        "title": "",
+        "location": "North elevation",
+        "action": "Replace warped panel"
+      }
+    ],
+    "attendees": [],
+    "open_items": [],
+    "facts": []
   }
 ]

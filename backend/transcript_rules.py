@@ -73,13 +73,14 @@ def extract(text,library=()):
         person=None
     def flush_item():
         nonlocal item,equipment_start
-        if item and (item.get('action') or item.get('location')):
+        if item and item.get('location') and not item.get('action'):
+            warn('A location without an explicit Action or Open item label was not added as an open item.')
+        if item and item.get('action'):
             quote=text[item['start']:item['end']].strip()
             if len(quote)<=5000 and len(draft['open_items'])<100:
                 row=dict(id=str(uuid.uuid4()),equipment=item['equipment'],location=item.get('location',''),action=item.get('action',''),source_quote=quote)
                 if not NEGATED.search(quote):
                     match_saved(row,library,'open_item',allow_exact=not item.get('unrecognized_equipment',False));draft['open_items'].append(row)
-                    if not row['action']:warn('A location has no explicit corrective action. Fill it or remove the item before applying.')
                 else:warn('A negated or already-corrected item was not added; review its wording manually.')
         item=None;equipment_start=None
     cuts=[(match.start(),match.end()) for match in SPLIT.finditer(text)];start=0

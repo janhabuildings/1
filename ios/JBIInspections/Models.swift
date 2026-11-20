@@ -461,7 +461,8 @@ enum CodedTranscript {
         }
         func flushItem() {
             defer { item = [:]; equipmentStart = nil }
-            guard !(item["location"] ?? "").isEmpty || !(item["action"] ?? "").isEmpty, draft.open_items.count < 100 else { return }
+            if !(item["location"] ?? "").isEmpty && (item["action"] ?? "").isEmpty { warn("A location without an explicit Action or Open item label was not added as an open item.") }
+            guard !(item["action"] ?? "").isEmpty, draft.open_items.count < 100 else { return }
             let quote = source.substring(with: NSRange(location: itemStart, length: itemEnd - itemStart)).trimmingCharacters(in: .whitespacesAndNewlines)
             guard quote.count <= 5000 else { return }
             guard matches(negated, quote).isEmpty else { warn("A negated or already-corrected item was not added; review its wording manually."); return }
@@ -476,7 +477,6 @@ enum CodedTranscript {
                 if row.equipment == "unknown" && !saved.equipment.isEmpty { row.equipment = saved.equipment }
             }
             draft.open_items.append(row)
-            if row.action.isEmpty { warn("A location has no explicit corrective action. Fill it or remove the item before applying.") }
         }
         let cuts = matches(split, text).map { ($0.range.location, NSMaxRange($0.range)) } + [(source.length,source.length)]
         var start = 0
