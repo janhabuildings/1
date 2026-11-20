@@ -950,7 +950,7 @@ struct TranscriptDraftReview: View {
             }.navigationTitle("Review transcript draft")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Apply draft") { apply() }.disabled(draft.open_items.contains { $0.equipment == "unknown" }) }
+                ToolbarItem(placement: .confirmationAction) { Button("Apply draft") { apply() }.disabled((draft.attendees.isEmpty && draft.open_items.isEmpty && draft.facts.isEmpty) || draft.open_items.contains { $0.equipment == "unknown" }) }
                 ToolbarItem(placement: .primaryAction) { EditButton() }
             }
         }

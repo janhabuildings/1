@@ -968,3 +968,47 @@ class WebWorkflow(unittest.TestCase):
         expect(self.page.locator('#status')).to_contain_text('Row saved for reuse')
         self.assertEqual(sorted(self.page.evaluate('savedRows.map(row=>row.kind)')),['attendee','company'])
         self.assertEqual(self.errors,[])
+
+    def test_coded_transcript_draft_needs_no_ai_consent_and_remains_editable(self):
+        from playwright.sync_api import expect
+        self.connect();self.page.locator('#project').fill('Reviewed project')
+        self.page.evaluate("async()=>{await json('/saved-rows',{method:'POST',json:{kind:'attendee',name:'Jane Smith',company:'ACME',title:'Safety Inspector'}});await refreshSavedRows();}")
+        self.page.locator('#transcript').fill('Attendee: Jane Smith. Equipment: Scaffold. Location: North. Action: Install missing pins.')
+        expect(self.page.locator('#transcript-ai-consent')).not_to_be_checked()
+        self.page.locator('#transcript-extract').click()
+        root=self.page.locator('#transcript-draft');expect(root).to_contain_text('Coded extraction only; no AI service was used.')
+        expect(root.get_by_label('company',exact=True)).to_have_value('ACME')
+        root.get_by_label('Corrective action',exact=True).fill('Install pins after field review')
+        root.get_by_role('button',name='Apply reviewed draft',exact=True).click()
+        expect(self.page.locator('#project')).to_have_value('Reviewed project')
+        self.assertEqual(self.page.evaluate('state.attendees[0].name'),'Jane Smith')
+        self.assertEqual(self.page.evaluate('state.attendees[0].company'),'ACME')
+        self.assertEqual(self.page.evaluate('state.reports[0].open_items[0].action'),'Install pins after field review')
+        self.assertEqual(self.page.evaluate('state.reports[0].status'),'OIs')
+        self.assertEqual(self.errors,[])
+
+    def test_unstructured_coded_text_offers_optional_ai_without_applying_empty_draft(self):
+        from playwright.sync_api import expect
+        self.connect();self.page.locator('#transcript').fill('John from ABC was supervising and the north panels need replacing.')
+        self.page.locator('#transcript-extract').click()
+        root=self.page.locator('#transcript-draft');expect(root).to_contain_text('No labeled values found')
+        expect(root.get_by_role('button',name='Apply reviewed draft',exact=True)).to_be_disabled()
+        self.assertEqual(self.page.evaluate('state.reports'),[])
+        expect(self.page.locator('#transcript-analyze')).to_have_text('Use AI for unstructured notes (optional)')
+        self.assertEqual(self.errors,[])
+
+    def test_coded_review_can_choose_saved_attendee_and_open_item_matches(self):
+        from playwright.sync_api import expect
+        self.connect()
+        self.page.evaluate("async()=>{await json('/saved-rows',{method:'POST',json:{kind:'attendee',name:'Jane Smith',company:'ACME',title:'Safety Inspector'}});await json('/saved-rows',{method:'POST',json:{kind:'open_item',equipment:'SH',location:'North elevation',action:'Replace warped panel'}});await refreshSavedRows();}")
+        self.page.locator('#transcript').fill('Attendee: Jaine Smith. Equipment: Shed. Action: Replace warped panel.')
+        self.page.locator('#transcript-extract').click();root=self.page.locator('#transcript-draft')
+        expect(root.get_by_label('name',exact=True)).to_have_value('Jaine Smith')
+        root.get_by_role('button',name='Use saved attendee: Jane Smith · ACME · Safety Inspector',exact=True).click()
+        expect(root.get_by_label('name',exact=True)).to_have_value('Jane Smith')
+        root.get_by_role('button',name='Use saved open item: SH · North elevation · Replace warped panel',exact=True).click()
+        expect(root.get_by_label('Location / occurrence',exact=True)).to_have_value('North elevation')
+        root.get_by_role('button',name='Apply reviewed draft',exact=True).click()
+        self.assertEqual(self.page.evaluate('state.attendees[0].name'),'Jane Smith')
+        self.assertEqual(self.page.evaluate('state.reports[0].open_items[0].location'),'North elevation')
+        self.assertEqual(self.errors,[])

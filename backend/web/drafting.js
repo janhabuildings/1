@@ -23,14 +23,14 @@ function showTranscriptDraft(draft,inspectionID){
   const root=$('transcript-draft');root.replaceChildren();root.append(el('h3','Review and edit transcript draft'),el('p','Applying fills empty common facts, merges attendees and adds open items. Existing facts and report-specific attendee lists are preserved. New open items remove the stamp from their report.','muted'));
   for(const warning of draft.warnings)root.append(el('p',warning,'muted'));
   const apply=el('button','Apply reviewed draft');
-  function refreshApply(){apply.disabled=state.id!==inspectionID||draft.open_items.some(row=>!['SF','SH','OT'].includes(row.equipment));apply.dataset.adopted=String(apply.disabled);}
+  function refreshApply(){apply.disabled=state.id!==inspectionID||![draft.attendees,draft.open_items,draft.facts].some(rows=>rows.length)||draft.open_items.some(row=>!['SF','SH','OT'].includes(row.equipment));apply.dataset.adopted=String(apply.disabled);}
   function section(title,rows,type){const box=el('div');box.append(el('h3',title));for(const row of rows){const card=el('div',undefined,'result-card');
     if(type==='fact')card.append(field(row.field,row.value,value=>row.value=value));
     else if(type==='attendee')for(const key of ['name','company','title'])card.append(field(key==='title'?'Role':key,row[key],value=>row[key]=value));
     else {card.append(field('Equipment',row.equipment,value=>{row.equipment=value;refreshApply();},{options:[['unknown','Choose equipment'],['SF','Scaffold'],['SH','Shed'],['OT','Other']]}));card.append(field('Location / occurrence',row.location,value=>row.location=value),field('Corrective action',row.action,value=>row.action=value,{type:'textarea'}));}
     card.append(el('p','Transcript: '+row.source_quote,'muted'));
     if(row.matched_saved_id)card.append(el('p','Exact saved-row match · missing details filled from your library','muted'));
-    for(const saved of row.saved_matches||[]){const choose=el('button',(kind==='attendee'&&key==='company'?'Fill attendee row: ':'Use saved: ')+savedSummary(saved),'secondary');choose.onclick=()=>{for(const key of type==='attendee'?['name','company','title']:['location','action','equipment'])if(saved[key])row[key]=saved[key];row.matched_saved_id=saved.id;showTranscriptDraft(draft,inspectionID);};card.append(choose);}
+    for(const saved of row.saved_matches||[]){const choose=el('button',(type==='attendee'?'Use saved attendee: ':'Use saved open item: ')+savedSummary(saved),'secondary');choose.onclick=()=>{for(const key of type==='attendee'?['name','company','title']:['location','action','equipment'])if(saved[key])row[key]=saved[key];row.matched_saved_id=saved.id;showTranscriptDraft(draft,inspectionID);};card.append(choose);}
     const remove=removeButton('Remove draft suggestion');remove.onclick=()=>{rows.splice(rows.indexOf(row),1);showTranscriptDraft(draft,inspectionID);};card.append(remove);box.append(card);
   }root.append(box);}
   section('Common facts',draft.facts,'fact');section('Attendees',draft.attendees,'attendee');section('Open items',draft.open_items,'open_item');

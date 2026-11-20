@@ -384,5 +384,42 @@
     ],
     "open_items": [],
     "facts": []
+  },
+  {
+    "name": "unrecognized explicit equipment needs review despite saved action",
+    "text": "Equipment: Mystery platform. Action: Replace warped panel.",
+    "library": [
+      {
+        "id": "panel",
+        "kind": "open_item",
+        "equipment": "SH",
+        "name": "",
+        "company": "",
+        "title": "",
+        "location": "North elevation",
+        "action": "Replace warped panel"
+      }
+    ],
+    "attendees": [],
+    "open_items": [
+      {
+        "equipment": "unknown",
+        "location": "",
+        "action": "Replace warped panel",
+        "matched_saved_id": null,
+        "saved_match_ids": [
+          "panel"
+        ]
+      }
+    ],
+    "facts": []
+  },
+  {
+    "name": "no repair needed is not an open item",
+    "text": "Equipment: Shed. Location: North. Action: No repair needed.",
+    "library": [],
+    "attendees": [],
+    "open_items": [],
+    "facts": []
   }
 ]

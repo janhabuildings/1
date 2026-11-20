@@ -394,7 +394,7 @@ extension Inspection {
 enum CodedTranscript {
     static let labels = ["attendee":"name", "attendees":"name", "name":"name", "company":"company", "company name":"company", "agency":"company", "company / agency":"company", "role":"title", "title":"title", "equipment":"equipment", "product":"equipment", "location":"location", "occurrence":"location", "corrective action":"action", "action":"action", "open item":"open_item", "observation":"observation", "client":"client", "project":"project", "address":"address", "requested by":"requested_by", "request date":"request_date", "inspection date":"inspection_date", "inspected on":"inspection_date"]
     static let limits = ["name":300, "company":300, "title":300, "location":3000, "action":5000, "project":200, "client":1000, "address":2000, "requested_by":1000, "request_date":10, "inspection_date":10]
-    static let negated = #"\b(?:no open items?|no deficiencies|not required|no need|do not|already (?:fixed|repaired|corrected|completed)|(?:has|have) been (?:fixed|repaired|corrected))\b"#
+    static let negated = #"(?:^\s*no\b)|\b(?:no open items?|no deficiencies|not required|no need|do not|already (?:fixed|repaired|corrected|completed)|(?:has|have) been (?:fixed|repaired|corrected))\b"#
     static func matches(_ pattern: String, _ value: String) -> [NSTextCheckingResult] {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
         return regex.matches(in: value, range: NSRange(location: 0, length: (value as NSString).length))
@@ -438,6 +438,7 @@ enum CodedTranscript {
         var person: [String:String] = [:], item: [String:String] = [:]
         var personStart = 0, personEnd = 0, itemStart = 0, itemEnd = 0
         var equipment = "unknown"
+        var unrecognizedEquipment = false
         var equipmentStart: Int? = nil
         var seenFacts: Set<String> = []
         func warn(_ message: String) { if !draft.warnings.contains(message) && draft.warnings.count < 30 { draft.warnings.append(message) } }
@@ -468,7 +469,7 @@ enum CodedTranscript {
             let ranked = Self.ranked(item, equipment: row.equipment, kind: "open_item", library: library)
             row.saved_matches = Array(ranked.prefix(5).map { $0.1 })
             let exact = ranked.filter { $0.0 == 1 }
-            if exact.count == 1 {
+            if exact.count == 1 && item["unrecognized_equipment"] != "true" {
                 let saved = exact[0].1; row.matched_saved_id = saved.id
                 if row.location.isEmpty { row.location = saved.location }
                 if row.action.isEmpty { row.action = saved.action }
@@ -493,7 +494,7 @@ enum CodedTranscript {
                 if person.isEmpty { personStart = chunkStart }
                 person[key] = value; personEnd = end
             } else if key == "equipment" {
-                flushPerson(); flushItem(); equipment = equipmentCode(value); equipmentStart = chunkStart
+                flushPerson(); flushItem(); equipment = equipmentCode(value); equipmentStart = chunkStart; unrecognizedEquipment = equipment == "unknown"
                 if equipment == "unknown" { warn("Equipment was not recognized. Assign the report type before applying.") }
             } else if ["location","action","open_item","observation"].contains(key) {
                 flushPerson()
@@ -501,7 +502,7 @@ enum CodedTranscript {
                 if !matches(negated, value).isEmpty { item = [:]; equipmentStart = nil; warn("A negated or already-corrected item was not added; review its wording manually."); continue }
                 let target = key == "open_item" ? "action" : key
                 if !(item[target] ?? "").isEmpty || (target == "location" && !(item["action"] ?? "").isEmpty) { flushItem() }
-                if item.isEmpty { itemStart = equipmentStart ?? chunkStart; item["equipment"] = equipment }
+                if item.isEmpty { itemStart = equipmentStart ?? chunkStart; item["equipment"] = equipment; item["unrecognized_equipment"] = unrecognizedEquipment ? "true" : "false" }
                 item[target] = value; itemEnd = end
                 if key == "open_item" { warn("Confirm that the open-item wording describes the corrective action you want in the report.") }
             } else {

@@ -13,7 +13,7 @@ LABELS = {
 LABEL = '|'.join(re.escape(key) for key in sorted(LABELS,key=len,reverse=True))
 SPLIT = re.compile(r'[\r\n]+|(?<=[.;!?])\s+(?=(?:'+LABEL+r')\b)|;\s*(?=(?:'+LABEL+r')\b)|,\s*(?=(?:'+LABEL+r')\s*(?::|\s))',re.I)
 FIELD = re.compile(r'^\s*('+LABEL+r')\b\s*(?::|=|\s+-\s+)?\s*(.+?)\s*$',re.I)
-NEGATED = re.compile(r'\b(?:no open items?|no deficiencies|not required|no need|do not|already (?:fixed|repaired|corrected|completed)|(?:has|have) been (?:fixed|repaired|corrected))\b',re.I)
+NEGATED = re.compile(r'(?:^\s*no\b)|\b(?:no open items?|no deficiencies|not required|no need|do not|already (?:fixed|repaired|corrected|completed)|(?:has|have) been (?:fixed|repaired|corrected))\b',re.I)
 LIMITS={'name':300,'company':300,'title':300,'location':3000,'action':5000,'project':200,'client':1000,'address':2000,'requested_by':1000,'request_date':10,'inspection_date':10}
 
 
@@ -32,7 +32,7 @@ def similarity(left,right):
     return 1-previous[-1]/max(len(left),len(right))
 
 
-def match_saved(row,library,kind):
+def match_saved(row,library,kind,allow_exact=True):
     keys=('name',) if kind=='attendee' else ('action','location')
     ranked=[]
     for saved in library:
@@ -43,7 +43,7 @@ def match_saved(row,library,kind):
     ranked.sort(key=lambda value:value[0],reverse=True)
     row['saved_matches']=[saved for _,saved in ranked[:5]];row['matched_saved_id']=None
     exact=[saved for score,saved in ranked if score==1]
-    if len(exact)==1:
+    if len(exact)==1 and allow_exact:
         saved=exact[0];row['matched_saved_id']=saved['id']
         for key in (('name','company','title') if kind=='attendee' else ('action','location')):
             if not row[key]:row[key]=saved.get(key,'')
@@ -60,7 +60,7 @@ def equipment_code(value):
 
 def extract(text,library=()):
     draft={'attendees':[],'open_items':[],'facts':[],'warnings':['Coded extraction only; no AI service was used. Review every value before applying.']}
-    person=None;item=None;equipment='unknown';equipment_start=None;seen_facts=set()
+    person=None;item=None;equipment='unknown';equipment_start=None;unrecognized_equipment=False;seen_facts=set()
     def warn(message):
         if message not in draft['warnings'] and len(draft['warnings'])<30:draft['warnings'].append(message)
     def flush_person():
@@ -78,7 +78,7 @@ def extract(text,library=()):
             if len(quote)<=5000 and len(draft['open_items'])<100:
                 row=dict(id=str(uuid.uuid4()),equipment=item['equipment'],location=item.get('location',''),action=item.get('action',''),source_quote=quote)
                 if not NEGATED.search(quote):
-                    match_saved(row,library,'open_item');draft['open_items'].append(row)
+                    match_saved(row,library,'open_item',allow_exact=not item.get('unrecognized_equipment',False));draft['open_items'].append(row)
                     if not row['action']:warn('A location has no explicit corrective action. Fill it or remove the item before applying.')
                 else:warn('A negated or already-corrected item was not added; review its wording manually.')
         item=None;equipment_start=None
@@ -96,7 +96,7 @@ def extract(text,library=()):
             if person is None:person={'start':chunk_start,'end':end}
             person[key]=value;person['end']=end
         elif key=='equipment':
-            flush_person();flush_item();equipment=equipment_code(value);equipment_start=chunk_start
+            flush_person();flush_item();equipment=equipment_code(value);equipment_start=chunk_start;unrecognized_equipment=equipment=='unknown'
             if equipment=='unknown':warn('Equipment was not recognized. Assign the report type before applying.')
         elif key in ('location','action','open_item','observation'):
             flush_person()
@@ -104,7 +104,7 @@ def extract(text,library=()):
             if NEGATED.search(value):item=None;equipment_start=None;warn('A negated or already-corrected item was not added; review its wording manually.');continue
             target='action' if key=='open_item' else key
             if item and ((target in item and item[target]) or (target=='location' and item.get('action'))):flush_item()
-            if item is None:item={'equipment':equipment,'start':equipment_start if equipment_start is not None else chunk_start,'end':end}
+            if item is None:item={'equipment':equipment,'unrecognized_equipment':unrecognized_equipment,'start':equipment_start if equipment_start is not None else chunk_start,'end':end}
             item[target]=value;item['end']=end
             if key=='open_item':warn('Confirm that the open-item wording describes the corrective action you want in the report.')
         else:
