@@ -4,7 +4,7 @@ import uuid
 
 MIGRATION = 'saved-row-history-v1'
 LIMIT = 1000
-KEYS = {'attendee': ('name', 'company', 'title'), 'open_item': ('location', 'action')}
+KEYS = {'attendee': ('name', 'company', 'title'), 'open_item': ('location', 'action'), 'company': ('company',)}
 LENGTHS = {'name':300, 'company':300, 'title':300, 'location':3000, 'action':5000}
 EMPTY = {'', '-', 'pending', '[pending confirmation]', 'tbd', 'n/a', 'na'}
 
@@ -55,4 +55,27 @@ def import_history(store, *, once=False):
                 if isinstance(items,list):
                     for item in items:add('open_item',item,equipment)
         if once:db.execute('INSERT INTO app_migrations VALUES (?,?)',(MIGRATION,json.dumps(counts)))
+        return counts
+
+
+def seed_companies(store, *, once=False):
+    marker='company-values-v1'
+    with store.connect() as db:
+        if once and db.execute('SELECT 1 FROM app_migrations WHERE id=?',(marker,)).fetchone():return None
+        existing=[json.loads(row['payload']) for row in db.execute('SELECT payload FROM saved_rows')]
+        known={signature(row) for row in existing if row['kind']=='company'}
+        counts={'companies_added':0,'limit_skipped':0}
+        total=len(existing)
+        for saved in existing:
+            if saved['kind']!='attendee':continue
+            for name in saved.get('company','').replace('\n',';').split(';'):
+                name=name.strip()
+                if name.casefold() in EMPTY:continue
+                row=dict(id=str(uuid.uuid4()),kind='company',equipment='',name='',company=name,title='',location='',action='')
+                key=signature(row)
+                if key in known:continue
+                if total>=LIMIT:counts['limit_skipped']+=1;continue
+                db.execute('INSERT INTO saved_rows VALUES (?,?)',(row['id'],json.dumps(row)))
+                known.add(key);total+=1;counts['companies_added']+=1
+        if once:db.execute('INSERT INTO app_migrations VALUES (?,?)',(marker,json.dumps(counts)))
         return counts

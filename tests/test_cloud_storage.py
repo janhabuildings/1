@@ -103,6 +103,16 @@ class DurableStorage(unittest.TestCase):
             self.assertEqual(client.get('/saved-rows',headers=HEADERS).json(),[])
             self.assertEqual(client.get('/inspections/'+identity,headers=HEADERS).json()['attendees'][0]['name'],'Inspector draft')
 
+    def test_company_values_are_independent_and_stay_deleted_after_cloud_restore(self):
+        with TestClient(self.app('company-first')) as client:
+            attendee=client.post('/saved-rows',headers=HEADERS,json={'kind':'attendee','name':'Jane Smith','company':'ACME','title':'PE'}).json()
+            company=client.post('/saved-rows',headers=HEADERS,json={'kind':'company','company':'ACME'}).json()
+        with TestClient(self.app('company-second')) as client:
+            rows=client.get('/saved-rows',headers=HEADERS).json();self.assertEqual(len(rows),2)
+            self.assertEqual(client.delete('/saved-rows/'+company['id'],headers=HEADERS).status_code,200)
+        with TestClient(self.app('company-third')) as client:
+            self.assertEqual(client.get('/saved-rows',headers=HEADERS).json(),[attendee])
+
     def test_saved_row_library_survives_fresh_server_and_deletion(self):
         with TestClient(self.app('rows-first')) as client:
             row=client.post('/saved-rows',headers=HEADERS,json={'kind':'open_item','equipment':'SH','location':'North','action':'Replace panel'}).json()

@@ -26,9 +26,12 @@ struct AttendeeListFields: View {
                 if nameFocus == person.id {
                     SavedRowMatches(query: person.name, key: "name", rows: attendeeRows) { row in fill(row, person: $person); nameFocus = nil }
                 }
-                MultiChoiceField(label: "Company / agency", value: $person.company, options: Array(Set(AttendeeOptions.companies + [client].filter { !$0.isEmpty })).sorted(), rowOptions: attendeeRows, rowKey: "company", chooseRow: { fill($0, person: $person) })
+                MultiChoiceField(label: "Company / agency", value: $person.company, options: Array(Set(AttendeeOptions.companies + store.companyNames + [client].filter { !$0.isEmpty })).sorted(), rowOptions: attendeeRows, rowKey: "company", chooseRow: { fill($0, person: $person) })
                 MultiChoiceField(label: "Role", value: $person.title, options: AttendeeOptions.roles, rowOptions: attendeeRows, rowKey: "title", chooseRow: { fill($0, person: $person) })
-                Button("Save attendee for reuse") { store.saveSuggestion(SavedRow(kind: "attendee", name: person.name, company: person.company, title: person.title)) }.font(.caption).buttonStyle(.borderless)
+                HStack {
+                    Button("Save attendee row") { store.saveSuggestion(SavedRow(kind: "attendee", name: person.name, company: person.company, title: person.title)) }
+                    Button("Save company name") { store.saveCompanyNames(person.company) }.disabled(person.company.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.font(.caption).buttonStyle(.borderless)
             }
         }
         Button("Add attendee") {
@@ -453,7 +456,7 @@ struct SavedRowMatches: View {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.count >= 2 {
             ForEach(Array(rows.filter { $0.value(key).localizedCaseInsensitiveContains(text) }.prefix(5))) { row in
-                Button { choose(row) } label: { Label(row.summary, systemImage: "text.badge.checkmark").font(.caption) }.buttonStyle(.borderless)
+                Button { choose(row) } label: { Label((row.kind == "attendee" && key == "company" ? "Fill attendee row: " : "") + row.summary, systemImage: "text.badge.checkmark").font(.caption) }.buttonStyle(.borderless)
             }
         }
     }
@@ -461,6 +464,15 @@ struct SavedRowMatches: View {
 struct SavedRowLibrary: View {
     @EnvironmentObject var store: InspectionStore
     @State private var query = ""
+    @State private var newCompany = ""
+    private var matches: [SavedRow] { (store.cache.savedRows ?? []).filter { query.isEmpty || $0.summary.localizedCaseInsensitiveContains(query) } }
+    private func savedEntry(_ row: SavedRow) -> some View {
+        VStack(alignment: .leading) {
+            Text(row.summary)
+            Text(store.cache.pendingSavedRows?.contains(row.id) == true ? "Saved on this phone · sync pending" : "Saved suggestion").font(.caption).foregroundStyle(.secondary)
+            Button(row.kind == "company" ? "Delete saved company" : "Delete saved suggestion", role: .destructive) { Task { do { try await store.deleteSuggestion(row) } catch { store.error = error.localizedDescription } } }
+        }
+    }
     var body: some View {
         List {
             Text("Save rows while drafting. Selecting a saved suggestion fills its nonempty cells; every value stays editable. Synced rows are shared across web and iPhone.").font(.caption)
@@ -474,12 +486,13 @@ struct SavedRowLibrary: View {
                 }
             }.disabled(!store.connected)
             if !store.libraryNotice.isEmpty { Text(store.libraryNotice).font(.caption) }
-            ForEach((store.cache.savedRows ?? []).filter { query.isEmpty || $0.summary.localizedCaseInsensitiveContains(query) }) { row in
-                VStack(alignment: .leading) {
-                    Text(row.summary)
-                    Text(store.cache.pendingSavedRows?.contains(row.id) == true ? "Saved on this phone · sync pending" : "Saved suggestion").font(.caption).foregroundStyle(.secondary)
-                    Button("Delete saved suggestion", role: .destructive) { Task { do { try await store.deleteSuggestion(row) } catch { store.error = error.localizedDescription } } }
-                }
+            Section("Company names · company cell only") {
+                TextField("New company name", text: $newCompany)
+                Button("Save company name") { store.saveCompanyNames(newCompany); newCompany = "" }.disabled(newCompany.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                ForEach(matches.filter { $0.kind == "company" }) { row in savedEntry(row) }
+            }
+            Section("Saved attendee and open-item rows · linked cells") {
+                ForEach(matches.filter { $0.kind != "company" }) { row in savedEntry(row) }
             }
         }.searchable(text: $query).navigationTitle("Saved rows")
         .task { do { try await store.syncSuggestions() } catch { store.error = error.localizedDescription } }

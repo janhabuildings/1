@@ -643,7 +643,7 @@ struct InspectionDetail: View {
                         ForEach(inspection.sharedAttendees) { person in Text(person.name.isEmpty ? person.company + " · " + person.title : person.name).tag(person.id) }
                     }
                     TextField("Attendee name", text: $photoPersonName)
-                    MultiChoiceField(label: "Company / agency", value: $photoCompany, options: AttendeeOptions.companies + [inspection.client ?? ""].filter { !$0.isEmpty })
+                    MultiChoiceField(label: "Company / agency", value: $photoCompany, options: AttendeeOptions.companies + store.companyNames + [inspection.client ?? ""].filter { !$0.isEmpty })
                     MultiChoiceField(label: "Role", value: $photoRole, options: AttendeeOptions.roles)
                     Text("Capture saved on this phone. Notes save as you type. Attendee details are shared with the inspection when you finish.").font(.caption).foregroundStyle(.secondary)
                 }

@@ -949,3 +949,22 @@ class WebWorkflow(unittest.TestCase):
         self.assertEqual(self.page.evaluate('state.attendees[0].company'),'ACME')
         self.assertEqual(self.page.evaluate('state.attendees[0].title'),'Safety Inspector')
         self.assertEqual(self.errors,[])
+
+    def test_company_only_save_and_suggestion_preserve_name_and_role(self):
+        from playwright.sync_api import expect
+        self.connect();self.page.locator('#add-attendee').click()
+        name=self.page.locator('#attendees').get_by_placeholder('Name',exact=True);name.fill('Jane Smith')
+        search=self.page.locator('#attendees').get_by_role('combobox',name='Search Company / agency',exact=True);search.fill('ACME Independent')
+        self.page.get_by_role('button',name='Add custom: ACME Independent',exact=True).click();self.choose_multiple_value('Role','Safety Inspector')
+        self.page.locator('#attendees').get_by_role('button',name='Save company name',exact=True).click()
+        expect(self.page.locator('#status')).to_contain_text('Company names saved separately')
+        rows=self.page.evaluate('savedRows');self.assertEqual(len(rows),1);self.assertEqual(rows[0]['kind'],'company')
+        self.page.reload();self.connect();self.page.locator('#add-attendee').click()
+        name=self.page.locator('#attendees').get_by_placeholder('Name',exact=True);name.fill('Jane Smith');self.choose_multiple_value('Role','Safety Inspector')
+        search=self.page.locator('#attendees').get_by_role('combobox',name='Search Company / agency',exact=True);search.fill('ACME')
+        self.page.get_by_role('option',name='Company / agency: ACME Independent',exact=True).click()
+        expect(name).to_have_value('Jane Smith');self.assertEqual(self.page.evaluate('state.attendees[0].title'),'Safety Inspector')
+        self.page.locator('#attendees').get_by_role('button',name='Save row',exact=True).click()
+        expect(self.page.locator('#status')).to_contain_text('Row saved for reuse')
+        self.assertEqual(sorted(self.page.evaluate('savedRows.map(row=>row.kind)')),['attendee','company'])
+        self.assertEqual(self.errors,[])

@@ -23,7 +23,7 @@ class SavedRowHistory(unittest.TestCase):
         original=self.seed();app=create_app(Settings(self.root,'fixture-token'))
         with TestClient(app) as client:
             rows=client.get('/saved-rows',headers=HEADERS).json()
-            self.assertEqual(len(rows),4)
+            self.assertEqual(len(rows),6)
             self.assertEqual(sum(row['kind']=='attendee' for row in rows),2)
             self.assertEqual({row['equipment'] for row in rows if row['kind']=='open_item'},{'SH','SF'})
             self.assertEqual(app.state.store.get('inspection'),original)
@@ -33,10 +33,10 @@ class SavedRowHistory(unittest.TestCase):
     def test_deleted_import_stays_deleted_after_restart_but_explicit_import_can_restore(self):
         self.seed()
         with TestClient(create_app(Settings(self.root,'fixture-token'))) as client:
-            identity=client.get('/saved-rows',headers=HEADERS).json()[0]['id']
+            identity=next(row['id'] for row in client.get('/saved-rows',headers=HEADERS).json() if row['kind']=='attendee')
             client.delete('/saved-rows/'+identity,headers=HEADERS)
         with TestClient(create_app(Settings(self.root,'fixture-token'))) as client:
-            self.assertEqual(len(client.get('/saved-rows',headers=HEADERS).json()),3)
+            self.assertEqual(len(client.get('/saved-rows',headers=HEADERS).json()),5)
             result=client.post('/saved-rows/import-history',headers=HEADERS).json()
             self.assertEqual(result['attendees_added']+result['open_items_added'],1)
     def test_import_preserves_existing_library_spelling_and_partial_rows(self):
