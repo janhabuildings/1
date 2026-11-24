@@ -293,6 +293,9 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
                       next(a['name'] for a in data['attendees'] if reports.is_pe(a['title'])))
                 if data['equipment']=='OT':
                     body='Dear Client,\n\nPlease see the attached inspection review draft for '+reports.product(data)+'. No open items were reported for the inspected locations. Review scope and findings before delivery.\n\nRegards,\n'+next(a['name'] for a in data['attendees'] if reports.is_pe(a['title']))
+                calendar_body=reports.no_open_items_email(request.get('calendar_text',''))
+                if calendar_body: body=calendar_body
+                entry['email_wording_source']='calendar' if calendar_body else 'standard'
                 content='<html><body style="font-family:Aptos,Calibri,sans-serif;font-size:12pt;color:#000000">'+''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in body.split('\n\n'))+'</body></html>'
                 html_file=folder/(safe+' - Cover.html');html_file.write_text(content)
                 entry['html_file']=str(html_file)
@@ -300,7 +303,7 @@ def generate(request, output, renderer='libreoffice', templates=None, pdf_postpr
             msg['Subject']=title;msg['From']=account;msg['X-Unsent']='1'
             if to: msg['To']=', '.join(to)
             if cc: msg['Cc']=', '.join(cc)
-            msg.set_content('Review draft. View the HTML version for the formatted inspection report.')
+            msg.set_content(body if data['status']=='No OIs' else 'Review draft. View the HTML version for the formatted inspection report.')
             msg.add_alternative(content,subtype='html')
             for attachment in attachments:
                 msg.add_attachment(Path(attachment['path']).read_bytes(),maintype='application',subtype='pdf',filename=attachment['filename'])
