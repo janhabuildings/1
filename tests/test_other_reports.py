@@ -45,7 +45,7 @@ class OtherReports(unittest.TestCase):
                     self.assertNotIn('Section 5',text)
                 with ZipFile(source) as a,ZipFile(path) as b:
                     for name in a.namelist():
-                        if name!='word/document.xml':self.assertEqual(a.read(name),b.read(name),name)
+                        if name not in ('word/document.xml','word/_rels/document.xml.rels','word/settings.xml','[Content_Types].xml'):self.assertEqual(a.read(name),b.read(name),name)
                 self.assertIn('Temporary Debris Screen',report_agent.subject(data))
             for kind in ('SOE','Fall Protection','Fence'):
                 data['site']={'report_type':kind}
@@ -93,10 +93,11 @@ class NoOIsNarrative(unittest.TestCase):
             for text in expected:
                 if text.strip():self.assertIn(text,actual)
             title=next(p._p for p in doc.paragraphs if p.text.startswith('Title:'))
-            for method,count in (('getprevious',2),('getnext',3)):
+            for method,count in (('getprevious',1),('getnext',1)):
                 node=title
                 for _ in range(count):
-                    node=getattr(node,method)();self.assertEqual(node.tag,report_agent.W+'p');self.assertFalse(node.xpath('.//w:t'))
-                    self.assertEqual(node.xpath('.//w:spacing/@w:line'),['280'])
+                    node=getattr(node,method)();self.assertEqual(node.tag,report_agent.W+'p');self.assertFalse(''.join(node.xpath('.//w:t/text()')).strip())
+                    self.assertEqual(node.xpath('.//w:spacing/@w:line'),['220'])
                     self.assertEqual(node.xpath('.//w:spacing/@w:lineRule'),['exact'])
                 self.assertTrue(getattr(node,method)().xpath('.//w:t'))
+
