@@ -1,27 +1,39 @@
 # Private report-rendering fonts
 
-The October 25 master uses Aptos. The supplied license does not grant font
-redistribution, and this repository is public. Do not commit font binaries here.
-The `.gitignore` excludes them.
+The October 25 master uses Aptos. Font binaries and encoded font data must stay
+out of this public repository. Use the operator-supplied, licensed files only.
 
-Install operator-supplied faces with a private Render **Secret File** named
-`aptos-fonts.zip.base64`. Paste the complete Base64 ZIP text prepared for the
-operator, not the binary ZIP itself. The archive contains regular, bold, italic,
-bold italic and the supplied license. Docker services read it at
-`/etc/secrets/aptos-fonts.zip.base64`; `REPORT_FONT_ARCHIVE` optionally overrides
-that path.
+Only Aptos regular, bold, italic and bold italic are required by the current
+report templates. Include their supplied license when preparing a private ZIP.
+Render limits the combined size of secret files to 1 MB; do not package all
+Display/Mono/Narrow/Serif/extra-weight fonts for that route. The four-face ZIP
+with its license is about 621 KB after Base64 encoding.
 
-At startup, `backend/font_assets.py` validates the archive, installs its fonts
-under `$XDG_DATA_HOME/fonts/jbi`, and refreshes fontconfig. The Docker image uses
-`/var/data` as XDG data home and makes its cache writable by the service user.
-Render keeps secret files across deployments, so the font install is recreated
-on each restart even on the free plan. The font folder is never web-served.
+## Private secret file
 
-Check authenticated `/capabilities` → `report_fonts`: installed should be 4,
-with family Aptos and no error. Generated report font audit should list Aptos
-under requested and have an empty missing list. Missing/invalid setup does not
-prevent inspection access; the error is exposed through capabilities instead.
+Create a Render Secret File named `aptos-fonts.zip.base64` containing the complete
+Base64 ZIP text. Docker reads `/etc/secrets/aptos-fonts.zip.base64`;
+`REPORT_FONT_ARCHIVE` can override this local path. Archives must have flat
+filenames. Local archive validation accepts up to 8 MB encoded and 16 MB expanded,
+while Render's smaller combined secret-file limit still applies.
 
-Only the four Aptos faces used by the current templates are necessary. The
-uploaded Display/Mono/Narrow/Serif and other weights are not required by the
-current template font audit.
+## Private environment transport
+
+Automation can merge `REPORT_FONT_DATA_PARTS`, `REPORT_FONT_DATA_SHA256` and
+`REPORT_FONT_DATA_001` through the declared part count into Render's private
+service environment. Each part contains at most 32,768 Base64 characters, avoiding
+per-variable process limits; the complete encoded data must be at most 1 MB.
+The SHA-256 is of the decoded ZIP. Missing parts or checksum errors reject the
+installation. These values are private runtime configuration, never source or logs.
+When configured, this transport takes precedence over the secret-file path.
+
+At startup the backend validates the complete archive, installs fonts under
+`$XDG_DATA_HOME/fonts/jbi`, refreshes fontconfig, and checks all four Aptos styles.
+The image uses `/var/data` for its writable XDG data/cache paths. Fonts are
+recreated after restarts and are not web-served or added to the inspection database.
+
+Authenticated `/capabilities` exposes only font status: `report_fonts.ready`,
+`missing_faces`, installed family names and resolved face metadata. Startup logs
+contain the same status, never the encoded data. The web UI distinguishes missing
+styles from a complete installation. Regenerate old PDFs after installing fonts;
+previously exported PDF files retain their original embedded fonts.

@@ -189,6 +189,7 @@ def create_app(settings=None):
     settings=settings or Settings.from_env()
     from backend.font_assets import configure_private_fonts
     report_fonts=configure_private_fonts()
+    print('Report font setup: '+json.dumps(report_fonts),flush=True)
     store=Store(settings.data_dir)
     from backend.templates import TemplateManager, sample_report
     templates=TemplateManager(store)

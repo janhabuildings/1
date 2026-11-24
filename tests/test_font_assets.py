@@ -50,3 +50,4 @@ class PrivateFonts(unittest.TestCase):
             self.assertEqual(result['installed'],1);self.assertTrue(result['families'])
             self.assertEqual((destination/'Operator.ttf').read_bytes(),source.read_bytes())
             self.assertEqual((destination/'License.txt').read_bytes(),b'Operator-supplied license')
+
