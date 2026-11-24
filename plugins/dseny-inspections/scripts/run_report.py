@@ -204,6 +204,13 @@ def email_html(path, source_docx=None):
             css.pop('margin',None)
             css.update(paragraphs[key].popleft())
         paragraph.set('style',';'.join(name+':'+value for name,value in css.items())+';')
+    # Named DOCX spacing landmarks survive Office HTML conversion as anchors.
+    # Override mail-client paragraph defaults so each gap remains one line.
+    for anchor in tree.xpath('//a[starts-with(@name,"JBI_ReportGap_") or starts-with(@id,"JBI_ReportGap_")]'):
+        paragraph=next((parent for parent in anchor.iterancestors() if parent.tag=='p'),None)
+        if paragraph is not None:
+            paragraph.set('data-report-gap',anchor.get('name') or anchor.get('id'))
+            apply(paragraph,{'margin':'0','margin-top':'0','margin-bottom':'0','padding':'0','font-size':'11pt','line-height':'11pt','height':'11pt','mso-line-height-rule':'exactly'})
     widths=[int(table.get('width')) for table in tree.xpath('//table') if table.get('width','').isdigit()]
     if body is not None and widths:
         # Keep introductory sentences in the same text column as the tables.

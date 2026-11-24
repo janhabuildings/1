@@ -225,6 +225,7 @@ def fill_placeholders(data, output, source, mapping, reserve_signature=False):
                         if first!=last:
                             for _,_,middle in offsets[first+1:last]: middle.text=''
                             end_node.text=suffix
+                if item.filename=='word/document.xml':changed=space_report_sections(root.find(W+'body')) or changed
                 if changed: content=etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
             result.writestr(item,content)
     return source
@@ -304,22 +305,45 @@ def no_ois_narrative(source=None):
             if not p.text.strip().startswith('A. IF')]
 
 
-def space_report_title(doc):
-    """Two blank lines above the title and three below, independent of template padding."""
-    title=next((p._p for p in doc.paragraphs if p.text.strip().startswith('Title:')),None)
-    if title is None:return
-    for direction in ('getprevious','getnext'):
-        node=getattr(title,direction)()
-        while node is not None and node.tag==W+'p' and not node.xpath('.//w:t | .//w:drawing | .//w:br | .//w:pageBreakBefore'):
-            following=getattr(node,direction)();node.getparent().remove(node);node=following
-    def blank():
-        p=etree.Element(W+'p');pr=etree.SubElement(p,W+'pPr');spacing=etree.SubElement(pr,W+'spacing')
-        for key,value in (('before','0'),('after','0'),('line','280'),('lineRule','exact')):spacing.set(W+key,value)
-        return p
-    for _ in range(2):title.addprevious(blank())
-    last=title
-    for _ in range(3):
-        p=blank();last.addnext(p);last=p
+REPORT_GAP_POINTS = 11
+REPORT_GAP_PREFIX = 'JBI_ReportGap_'
+
+
+def space_report_sections(body):
+    """One explicit line at report landmarks, shared by DOCX, PDF and email."""
+    if body is None:return False
+    def query(node,expression):return etree.XPath(expression,namespaces=NS)(node)
+    def text(node):return ' '.join(''.join(query(node,'.//w:t/text()')).split())
+    def empty(node):
+        return node is not None and node.tag==W+'p' and not text(node) and not query(node,'.//w:drawing | .//w:pict | .//w:br | .//w:pageBreakBefore | .//w:sectPr')
+    ids=[int(value) for value in query(body,'.//w:bookmarkStart/@w:id') if value.isdigit()]
+    bookmark=max(ids,default=0)+1
+    def gap(anchor,before,name):
+        nonlocal bookmark
+        direction='getprevious' if before else 'getnext'
+        node=getattr(anchor,direction)()
+        while empty(node):
+            following=getattr(node,direction)();body.remove(node);node=following
+        paragraph=etree.Element(W+'p');props=etree.SubElement(paragraph,W+'pPr')
+        spacing=etree.SubElement(props,W+'spacing')
+        for key,value in (('before','0'),('after','0'),('line',str(REPORT_GAP_POINTS*20)),('lineRule','exact')):spacing.set(W+key,value)
+        etree.SubElement(props,W+'keepNext')
+        start=etree.SubElement(paragraph,W+'bookmarkStart');start.set(W+'id',str(bookmark));start.set(W+'name',REPORT_GAP_PREFIX+name)
+        run=etree.SubElement(paragraph,W+'r');rpr=etree.SubElement(run,W+'rPr');etree.SubElement(rpr,W+'sz').set(W+'val',str(REPORT_GAP_POINTS*2))
+        etree.SubElement(run,W+'t').text='\u00a0'
+        etree.SubElement(paragraph,W+'bookmarkEnd').set(W+'id',str(bookmark));bookmark+=1
+        anchor.addprevious(paragraph) if before else anchor.addnext(paragraph)
+    children=list(body);changed=False
+    letterhead=next((node for node in children if node.tag==W+'tbl' and re.search(r'DSENY\s+Engineering\s+Services',text(node),re.I)),None)
+    if letterhead is not None:
+        gap(letterhead,True,'BeforeLetterhead');gap(letterhead,False,'AfterLetterhead');changed=True
+    title=next((node for node in children if node.tag==W+'p' and re.match(r'^Title\s*:',text(node),re.I)),None)
+    if title is not None:gap(title,False,'AfterTitle');changed=True
+    section3=next((node for node in children if node.tag==W+'tbl' and re.match(r'^Section\s*3\b',text(node),re.I)),None)
+    if section3 is not None:gap(section3,False,'AfterSection3');changed=True
+    section5=next((node for node in children if node.tag in (W+'p',W+'tbl') and re.match(r'^Section\s*5\b',text(node),re.I)),None)
+    if section5 is not None:gap(section5,True,'BeforeSection5');changed=True
+    return changed
 
 
 def fill_report(data, output, *, draft=False, template=None, template_mode="legacy", mapping=None, reserve_signature=False):
@@ -404,7 +428,7 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
         t._element.getparent().remove(t._element)
     if data['status']=='No OIs': compact_no_ois_layout(doc)
     separate_sections(doc)
-    if data['status']=='No OIs':space_report_title(doc)
+    space_report_sections(doc._element.body)
     # Copy all original package parts verbatim except the populated main document.
     xml = etree.tostring(doc._element, xml_declaration=True, encoding='UTF-8', standalone=True)
     with ZipFile(source) as original, ZipFile(output, 'w') as result:
