@@ -16,7 +16,6 @@ struct MailPayload: Identifiable { let id = UUID(); var subject: String; var htm
 struct InspectionList: View {
     @EnvironmentObject var store: InspectionStore
     @State private var settings = false
-    @State private var syncing = false
     @State private var deleteInspectionID: String?
     var body: some View {
         NavigationStack {
@@ -46,8 +45,8 @@ struct InspectionList: View {
                     deleteInspectionID = nil
                 }
             }
-            .task { if store.connected { do { try await store.syncAll() } catch { store.error = "Could not refresh synced inspections: " + error.localizedDescription } } }
-            .refreshable { do { try await store.syncAll() } catch { store.error = error.localizedDescription } }
+            .task { if store.connected { await refreshInspectionList() } }
+            .refreshable { await refreshInspectionList() }
             .overlay { if store.cache.inspections.isEmpty { ContentUnavailableView("Your inspections", systemImage: "building.2", description: Text("Tap + to begin. Photos and notes are saved on your phone.")) } }
             .navigationTitle("JBI Inspections")
             .navigationDestination(for: String.self) { identity in
@@ -57,15 +56,21 @@ struct InspectionList: View {
                 ToolbarItem(placement: .topBarLeading) { Button("Settings", systemImage: "gear") { settings = true } }
                 ToolbarItem(placement: .topBarTrailing) { Button("New inspection", systemImage: "plus") { store.save(Inspection.fresh(existing: store.cache.inspections)) } }
                 ToolbarItem(placement: .bottomBar) {
-                    Button(syncing ? "Refreshing…" : "Sync / refresh inspections", systemImage: "arrow.clockwise") {
-                        Task { syncing = true; defer { syncing = false }; do { try await store.syncAll() } catch { store.error = error.localizedDescription } }
-                    }.disabled(syncing)
+                    Button(store.refreshing ? "Refreshing…" : "Sync / refresh inspections", systemImage: "arrow.clockwise") {
+                        Task { await refreshInspectionList() }
+                    }.disabled(store.refreshing)
                 }
             }
             .sheet(isPresented: $settings) { SettingsView() }
             .alert("Inspection app", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
                 Button("OK") { store.error = nil }
             } message: { Text(store.error ?? "") }
+        }
+    }
+    private func refreshInspectionList() async {
+        do { try await store.syncAll() }
+        catch {
+            if let message = SyncFailure.refreshMessage(error, callerCancelled: Task.isCancelled) { store.error = message }
         }
     }
 }
@@ -539,8 +544,6 @@ struct InspectionDetail: View {
                         Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
                     }
                     TextField("Location / observation", text: mediaBinding(item.id, \.note), axis: .vertical)
-                        .onChange(of: item.note) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
-                        .onChange(of: item.equipment) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
                     if ["photo", "audio", "video"].contains(item.kind) {
                         Button("Delete evidence", role: .destructive) { removeMediaID = item.id }.buttonStyle(.borderless)
                     }
@@ -554,7 +557,7 @@ struct InspectionDetail: View {
                     Text(item.uploaded ? "Uploaded to backend" : "Saved on this phone").font(.caption).foregroundStyle(.secondary)
                 }
             }
-        }.onChange(of: store.cache.media) { _, _ in store.cache.dirty.insert(inspection.id); store.persist() }
+        }
     }
     private var reports: some View {
         Section("Report facts — inspector review") {
@@ -723,7 +726,10 @@ struct InspectionDetail: View {
     }
     private func mediaBinding(_ id: String, _ key: WritableKeyPath<LocalMedia, String>) -> Binding<String> {
         Binding(get: { store.cache.media.first(where: { $0.id == id })?[keyPath: key] ?? "" }, set: { value in
-            if let index = store.cache.media.firstIndex(where: { $0.id == id }) { store.cache.media[index][keyPath: key] = value }
+            if let index = store.cache.media.firstIndex(where: { $0.id == id }), store.cache.media[index][keyPath: key] != value {
+                store.cache.media[index][keyPath: key] = value
+                store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync()
+            }
         })
     }
     private func scheduleSync() {

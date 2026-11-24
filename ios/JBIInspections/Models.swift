@@ -520,3 +520,43 @@ enum CodedTranscript {
         return draft
     }
 }
+
+// SwiftUI can cancel its view task during navigation. Cancellation is control
+// flow, not an authentication, connectivity or server failure.
+enum SyncFailure {
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let value = error as NSError
+        return value.domain == NSURLErrorDomain && value.code == URLError.cancelled.rawValue
+    }
+    static func refreshMessage(_ error: Error, callerCancelled: Bool) -> String? {
+        guard !callerCancelled && !isCancellation(error) else { return nil }
+        return "Could not refresh synced inspections: " + error.localizedDescription
+    }
+}
+
+// Own a single refresh independently of whichever screen requested it. Other
+// callers join that operation; leaving a screen does not cancel its requests.
+@MainActor final class RefreshCoordinator {
+    private var running: (id: UUID, task: Task<Void, Error>)?
+    func run(_ operation: @escaping @MainActor () async throws -> Void) async throws {
+        if let current = running { try await current.task.value; return }
+        let id = UUID()
+        let task = Task { try await operation() }
+        running = (id, task)
+        defer { if running?.id == id { running = nil } }
+        try await task.value
+    }
+}
+
+// A response that was requested before a local edit/deletion must not overwrite
+// that newer state when it arrives after navigation into the inspection.
+enum RefreshMergePolicy {
+    static func allowsInspection(_ id: String, cache: Cache, deleted: Set<String>) -> Bool {
+        cache.inspections.contains { $0.id == id } && !cache.dirty.contains(id) &&
+        cache.pendingInspectionDeletions?.contains(id) != true && !deleted.contains(id)
+    }
+    static func allowsMedia(_ id: String, before: LocalMedia?, current: LocalMedia?, pending: Set<String>, deleted: Set<String>) -> Bool {
+        !pending.contains(id) && !deleted.contains(id) && before == current
+    }
+}

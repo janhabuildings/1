@@ -33,6 +33,10 @@ jobs:
         run: |
           swiftc ios/JBIInspections/Models.swift ios/Tests/CodedTranscriptRegression.swift -o "$RUNNER_TEMP/transcript-regression"
           "$RUNNER_TEMP/transcript-regression"
+      - name: Verify refresh cancellation and concurrent callers
+        run: |
+          swiftc ios/JBIInspections/Models.swift ios/Tests/SyncRegression.swift -o "$RUNNER_TEMP/sync-regression"
+          "$RUNNER_TEMP/sync-regression"
       - name: Compile iPhone simulator app
         run: |
           set -o pipefail

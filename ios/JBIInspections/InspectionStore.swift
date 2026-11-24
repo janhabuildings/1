@@ -5,6 +5,10 @@ import Foundation
     @Published var cache = Cache()
     @Published var error: String?
     @Published var busy = false
+    @Published private(set) var refreshing = false
+    private let refreshCoordinator = RefreshCoordinator()
+    private var locallyDeletedInspections: Set<String> = []
+    private var locallyDeletedMedia: Set<String> = []
     @Published var libraryNotice = ""
     private var suggestionSync: (id: UUID, task: Task<Void, Error>)?
     let directory: URL
@@ -20,6 +24,8 @@ import Foundation
                 cache = try JSONDecoder().decode(Cache.self, from: Data(contentsOf: file))
             }
         } catch { self.error = "Local storage: \(error.localizedDescription)" }
+        locallyDeletedInspections.formUnion(cache.pendingInspectionDeletions ?? [])
+        locallyDeletedMedia.formUnion(cache.pendingMediaDeletions ?? [])
     }
     var api: API { API(baseURL: UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL, token: SecureToken.read()) }
     var companyNames: [String] { (cache.savedRows ?? []).filter { $0.kind == "company" }.map(\.company) }
@@ -102,6 +108,7 @@ import Foundation
         }
     }
     func removeInspection(_ id: String) {
+        locallyDeletedInspections.insert(id)
         activeSyncs[id]?.task.cancel()
         for (artifact,owner) in cache.artifactOwners ?? [:] where owner == id {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent("exports").appendingPathComponent(artifact))
@@ -114,6 +121,7 @@ import Foundation
     }
     func removeMedia(_ id: String) {
         guard let item = cache.media.first(where: { $0.id == id }) else { return }
+        locallyDeletedMedia.insert(id)
         try? FileManager.default.removeItem(at: mediaURL(item)); cache.media.removeAll { $0.id == id }
         for i in cache.inspections.indices {
             for j in cache.inspections[i].reports.indices { cache.inspections[i].reports[j].photo_references.removeAll { $0 == id } }
@@ -159,35 +167,52 @@ import Foundation
         persist()
     }
     func syncAll() async throws {
+        try await refreshCoordinator.run {
+            self.refreshing = true
+            defer { self.refreshing = false }
+            try await self.performSyncAll()
+        }
+    }
+    private func performSyncAll() async throws {
         try await refresh()
         for inspection in cache.inspections where cache.dirty.contains(inspection.id) { try await sync(inspection) }
         try await refresh()
+    }
+    private func canApplyRefresh(_ id: String) -> Bool {
+        RefreshMergePolicy.allowsInspection(id, cache: cache, deleted: locallyDeletedInspections)
     }
     func refresh() async throws {
         try await syncSuggestions()
         try await flushDeletions()
         let deleted = try JSONDecoder().decode(DeletionState.self, from: await api.request("/sync/deletions"))
+        locallyDeletedInspections.formUnion(deleted.inspections); locallyDeletedMedia.formUnion(deleted.media)
         for item in cache.media where deleted.media.contains(item.id) || deleted.inspections.contains(item.inspectionID) { try? FileManager.default.removeItem(at: mediaURL(item)) }
         cache.media.removeAll { deleted.media.contains($0.id) || deleted.inspections.contains($0.inspectionID) }
         cache.inspections.removeAll { deleted.inspections.contains($0.id) }; cache.dirty.subtract(deleted.inspections)
         let remote = try JSONDecoder().decode([Inspection].self, from: await api.request("/inspections"))
         let remoteIDs = Set(remote.map(\.id))
         for local in cache.inspections where !remoteIDs.contains(local.id) && !deleted.inspections.contains(local.id) { cache.dirty.insert(local.id) }
-        for inspection in remote where !cache.dirty.contains(inspection.id) {
+        for inspection in remote where !cache.dirty.contains(inspection.id) && !locallyDeletedInspections.contains(inspection.id) && cache.pendingInspectionDeletions?.contains(inspection.id) != true {
             if let i = cache.inspections.firstIndex(where: { $0.id == inspection.id }) { cache.inspections[i] = inspection }
             else { cache.inspections.append(inspection) }
+            let baseline = cache.media.filter { $0.inspectionID == inspection.id }.reduce(into: [String:LocalMedia]()) { $0[$1.id] = $1 }
             let records = try JSONSerialization.jsonObject(with: await api.request("/inspections/\(inspection.id)/media")) as? [[String: Any]] ?? []
             for record in records {
-                guard let id = record["id"] as? String, let kind = record["kind"] as? String, let mime = record["mime"] as? String else { continue }
+                guard canApplyRefresh(inspection.id), let id = record["id"] as? String, let kind = record["kind"] as? String, let mime = record["mime"] as? String else { continue }
+                let current = cache.media.first { $0.id == id }
+                guard RefreshMergePolicy.allowsMedia(id, before: baseline[id], current: current, pending: cache.pendingMediaDeletions ?? [], deleted: locallyDeletedMedia) else { continue }
                 let ext = ["image/png": "png", "image/jpeg": "jpg", "audio/wav": "wav", "audio/mpeg": "mp3", "audio/mp4": "m4a", "video/mp4": "mp4", "video/quicktime": "mov"][mime] ?? "bin"
-                if let index = cache.media.firstIndex(where: { $0.id == id }) {
-                    if !FileManager.default.fileExists(atPath: mediaURL(cache.media[index]).path) {
+                if let current {
+                    if !FileManager.default.fileExists(atPath: mediaURL(current).path) {
                         let bytes = try await api.request("/media/\(id)")
-                        try bytes.write(to: mediaURL(cache.media[index]), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                        guard canApplyRefresh(inspection.id), RefreshMergePolicy.allowsMedia(id, before: baseline[id], current: cache.media.first { $0.id == id }, pending: cache.pendingMediaDeletions ?? [], deleted: locallyDeletedMedia) else { continue }
+                        try bytes.write(to: mediaURL(current), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                     }
+                    guard let index = cache.media.firstIndex(where: { $0.id == id }) else { continue }
                     cache.media[index].note = record["note"] as? String ?? ""; cache.media[index].equipment = record["equipment"] as? String ?? ""
                 } else {
                     let data = try await api.request("/media/\(id)")
+                    guard canApplyRefresh(inspection.id), RefreshMergePolicy.allowsMedia(id, before: baseline[id], current: cache.media.first { $0.id == id }, pending: cache.pendingMediaDeletions ?? [], deleted: locallyDeletedMedia) else { continue }
                     let path = id + "." + ext
                     try data.write(to: directory.appendingPathComponent(path), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                     cache.media.append(LocalMedia(id: id, inspectionID: inspection.id, kind: kind, relativePath: path,
