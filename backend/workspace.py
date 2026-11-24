@@ -45,7 +45,7 @@ class Workspace:
         digest=hashlib.sha256(supplied.encode()).hexdigest()
         for user in self.rows('workspace_users'):
             if user.get('active') and secrets.compare_digest(digest,user.get('key_hash','')):return self.public(user)
-        raise HTTPException(401,'Access key is invalid or deactivated',headers={'WWW-Authenticate':'Bearer'})
+        raise HTTPException(401,'Authentication required',headers={'WWW-Authenticate':'Bearer'})
     def admin(self):
         if self.current()['role']!='admin':raise HTTPException(403,'Administrator access required')
     def create_user(self,name,email,role):

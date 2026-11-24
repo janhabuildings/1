@@ -419,6 +419,7 @@ def create_app(settings=None):
     @app.get('/inspections',dependencies=[Depends(authorized)])
     def list_inspections():
         result=[row for row in store.list() if workspace_access.allowed(row['id'])]
+        for row in result:row['revision']=row.get('revision') or 0
         if workspace_access.current()['role']=='admin':
             for row in result:row['assigned_user_ids']=(workspace_access.get('inspection_access',row['id']) or {}).get('assigned_user_ids',[])
         return result
@@ -437,6 +438,7 @@ def create_app(settings=None):
     @app.get('/inspections/{identity}',dependencies=[Depends(authorized)])
     def get_inspection(identity:str):
         record=store.get(identity)
+        record['revision']=record.get('revision') or 0
         if record.get('calendar_text'):record['calendar_candidates']=calendar_candidates(record['calendar_text'])
         return record
 

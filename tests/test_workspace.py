@@ -32,12 +32,18 @@ class WorkspaceAccess(unittest.TestCase):
         return self.client.put('/inspections/'+record['id']+'/assignments',headers=OWNER,json={'assigned_user_ids':[u['id'] for u in users]})
     def test_legacy_records_remain_admin_only_until_assigned(self):
         record=self.create()
-        with self.app.state.store.connect() as db:db.execute('DELETE FROM inspection_access')
+        with self.app.state.store.connect() as db:
+            db.execute('DELETE FROM inspection_access')
+            legacy=dict(record);legacy.pop('revision',None)
+            db.execute('UPDATE inspections SET payload=? WHERE id=?',(json.dumps(legacy),record['id']))
         self.assertEqual(self.client.get('/inspections',headers=headers(self.a['access_key'])).json(),[])
         self.assertEqual(self.client.get('/inspections/'+record['id'],headers=headers(self.a['access_key'])).status_code,404)
         self.assertEqual(self.assign(record,self.a).status_code,200)
         self.assertEqual(len(self.client.get('/inspections',headers=headers(self.a['access_key'])).json()),1)
         self.assertEqual(len(self.client.get('/inspections',headers=OWNER).json()),1)
+        reopened=self.client.get('/inspections/'+record['id'],headers=headers(self.a['access_key'])).json()
+        self.assertEqual(reopened['revision'],0)
+        self.assertEqual(self.client.put('/inspections/'+record['id'],headers=headers(self.a['access_key']),json=reopened).status_code,200)
     def test_creation_and_assignments_cannot_be_forged(self):
         record=self.create(headers(self.a['access_key']))
         for method in ('get','put','delete'):
