@@ -1,4 +1,4 @@
-"""Authenticated single-user inspection API. No send-mail or call-recording endpoints."""
+"""Authenticated shared-company inspection API. No send-mail or call-recording endpoints."""
 import asyncio
 import base64
 from datetime import date
@@ -60,6 +60,7 @@ class ReportInput(BaseModel):
 
 
 class InspectionInput(BaseModel):
+    revision: int | None = Field(default=None,ge=0)
     attendees_initialized: bool = False
     attendees: list[AttendeeInput] = Field(default_factory=list,max_length=50)
     title: str = Field(min_length=1,max_length=1000)
@@ -195,6 +196,9 @@ def create_app(settings=None):
     templates=TemplateManager(store)
     from backend import lifecycle,signatures
     lifecycle.initialize(store);signatures.initialize(store)
+    from backend.workspace import Workspace, initialize as initialize_workspace, principal
+    initialize_workspace(store)
+    workspace_access=Workspace(store,settings.token)
     from backend.cloud_storage import CloudStorage,CloudStorageError,CloudConflict
     cloud=CloudStorage.from_env(store,settings.token)
     if cloud:
@@ -217,12 +221,12 @@ def create_app(settings=None):
 
     @app.middleware('http')
     async def response_headers(request,call_next):
-        if cloud and request.url.path not in ('/','/health') and not request.url.path.startswith('/web/'):
+        if request.url.path not in ('/','/health') and not request.url.path.startswith('/web/'):
             from fastapi.responses import JSONResponse
             async with storage_lock:
                 try:
                     response=await call_next(request)
-                    if request.method in ('POST','PUT','PATCH','DELETE') and response.status_code<400:
+                    if cloud and request.method in ('POST','PUT','PATCH','DELETE') and response.status_code<400:
                         await asyncio.to_thread(cloud.sync)
                 except CloudConflict as error:
                     try:await asyncio.to_thread(cloud.restore)
@@ -247,12 +251,48 @@ def create_app(settings=None):
         from fastapi.responses import JSONResponse
         return JSONResponse({'detail':'Record not found'},status_code=404)
 
-    async def authorized(authorization: str | None=Header(default=None)):
-        if not settings.token:
-            raise HTTPException(503,'Configure INSPECTION_API_TOKEN before using this service')
-        supplied=authorization.removeprefix('Bearer ') if authorization else ''
-        if not authorization or not authorization.startswith('Bearer ') or not secrets.compare_digest(supplied.encode(),settings.token.encode()):
-            raise HTTPException(401,'Authentication required',headers={'WWW-Authenticate':'Bearer'})
+    async def authorized(request:Request,authorization: str | None=Header(default=None)):
+        user=workspace_access.authenticate(authorization)
+        principal.set(user)
+        request.state.user=user
+        workspace_access.authorize_path(request.url.path,request.method)
+        return user
+
+    class WorkspaceUserInput(BaseModel):
+        name: str = Field(min_length=1,max_length=120)
+        email: str = Field(min_length=3,max_length=254,pattern=r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+        role: Literal['admin','inspector'] = 'inspector'
+
+    class WorkspaceUserChange(BaseModel):
+        active: bool | None = None
+        rotate_key: bool = False
+
+    class AssignmentInput(BaseModel):
+        assigned_user_ids: list[str] = Field(default_factory=list,max_length=100)
+
+    @app.get('/workspace/me',dependencies=[Depends(authorized)])
+    def workspace_me():
+        return dict(workspace_access.current(),workspace_name='Company inspection workspace')
+
+    @app.get('/workspace/users',dependencies=[Depends(authorized)])
+    def workspace_users():return [workspace_access.public(row) for row in workspace_access.rows('workspace_users')]
+
+    @app.post('/workspace/users',status_code=201,dependencies=[Depends(authorized)])
+    def workspace_create_user(data:WorkspaceUserInput):return workspace_access.create_user(data.name,data.email,data.role)
+
+    @app.patch('/workspace/users/{identity}',dependencies=[Depends(authorized)])
+    def workspace_change_user(identity:str,data:WorkspaceUserChange):return workspace_access.change_user(identity,data.active,data.rotate_key)
+
+    @app.get('/workspace/audit',dependencies=[Depends(authorized)])
+    def workspace_audit():return workspace_access.rows('workspace_events')[-500:]
+
+    @app.get('/inspections/{identity}/assignments',dependencies=[Depends(authorized)])
+    def inspection_assignments(identity:str):
+        workspace_access.admin()
+        return workspace_access.get('inspection_access',identity) or {'id':identity,'created_by':'workspace-owner','assigned_user_ids':[]}
+
+    @app.put('/inspections/{identity}/assignments',dependencies=[Depends(authorized)])
+    def inspection_assign(identity:str,data:AssignmentInput):return workspace_access.assign(identity,data.assigned_user_ids)
 
     @app.get('/health')
     def health(): return {'status':'ok'}
@@ -377,16 +417,22 @@ def create_app(settings=None):
         return {'draft':draft,'applied_to_report':False}
 
     @app.get('/inspections',dependencies=[Depends(authorized)])
-    def list_inspections(): return store.list()
+    def list_inspections():
+        result=[row for row in store.list() if workspace_access.allowed(row['id'])]
+        if workspace_access.current()['role']=='admin':
+            for row in result:row['assigned_user_ids']=(workspace_access.get('inspection_access',row['id']) or {}).get('assigned_user_ids',[])
+        return result
 
     @app.post('/inspections',status_code=201,dependencies=[Depends(authorized)])
     def create_inspection(data:InspectionInput):
-        payload=json.loads(data.model_dump_json());payload['id']=uid()
+        payload=json.loads(data.model_dump_json());payload['id']=uid();payload['revision']=1
         if 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
         for report in payload['reports']:
             if report['status']!='No OIs':report['stamp_requested']=False
             if not report['attendees_override']:report['attendees']=payload['attendees']
-        return store.save(payload)
+        store.save(payload)
+        workspace_access.register(payload['id'])
+        return payload
 
     @app.get('/inspections/{identity}',dependencies=[Depends(authorized)])
     def get_inspection(identity:str):
@@ -405,6 +451,10 @@ def create_app(settings=None):
             previous=db.execute('SELECT payload FROM inspections WHERE id=?',(identity,)).fetchone()
             if previous:
                 old=json.loads(previous['payload'])
+                current_revision=old.get('revision') or 0
+                if (data.revision is not None and data.revision!=current_revision) or (data.revision is None and workspace_access.current()['id']!='workspace-owner'):
+                    raise HTTPException(409,'Another user or device changed this inspection. Download a JSON backup of your edits, then reopen the latest inspection before saving.')
+                payload['revision']=current_revision+1
                 if 'report_versions' in old:payload['report_versions']=old['report_versions']
                 if 'attendees_initialized' not in data.model_fields_set:payload['attendees_initialized']=old.get('attendees_initialized',False)
                 if 'generated_title' not in data.model_fields_set:payload['generated_title']=old.get('generated_title')
@@ -423,6 +473,7 @@ def create_app(settings=None):
                     payload['attendees']=merge_report_attendees(payload['reports'],old.get('attendees',[]))
             if db.execute('SELECT 1 FROM deleted_inspections WHERE id=?',(identity,)).fetchone():
                 raise HTTPException(409,'This inspection was deleted on the backend. Refresh before continuing.')
+            if not previous:payload['revision']=1
             if not previous and 'attendees' not in data.model_fields_set:payload['attendees']=merge_report_attendees(payload['reports'])
             for report in payload['reports']:
                 if report['status']!='No OIs':report['stamp_requested']=False
@@ -430,6 +481,7 @@ def create_app(settings=None):
             removed={r['id'] for r in db.execute('SELECT id FROM deleted_media WHERE inspection_id=?',(identity,))}
             for report in payload['reports']: report['photo_references']=[p for p in report['photo_references'] if p not in removed]
             db.execute('INSERT INTO inspections VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',(identity,json.dumps(payload)))
+        workspace_access.register(identity)
         return payload
 
     @app.post('/calendar/extract',dependencies=[Depends(authorized)])
@@ -617,6 +669,7 @@ def create_app(settings=None):
         stamp=None
         stamp_entries=[r for r in entries if r['status']=='No OIs' and (data.stamp_equipment is None or r['equipment'] in data.stamp_equipment)]
         if data.stamp_id and stamp_entries:
+            workspace_access.check_stamp(data.stamp_id)
             if not data.stamp_reviewed: raise HTTPException(422,'Confirm you reviewed the No OIs report and authorize applying your stored stamp image')
             try:
                 stamp=signatures.get(store,data.stamp_id);signatures.validate_owner(stamp,stamp_entries)
@@ -683,7 +736,13 @@ def create_app(settings=None):
         return await render_reports(entries,data,selected,identity)
 
     @app.get('/sync/deletions',dependencies=[Depends(authorized)])
-    def deleted_records(): return lifecycle.deletions(store)
+    def deleted_records():
+        if workspace_access.current()['role']=='admin':return lifecycle.deletions(store)
+        with store.connect() as db:
+            inspections=[r['id'] for r in db.execute('SELECT id FROM deleted_inspections') if workspace_access.allowed(r['id'])]
+            media=[r['id'] for r in db.execute('SELECT id,inspection_id FROM deleted_media') if workspace_access.allowed(r['inspection_id'])]
+        revoked=[r['id'] for r in workspace_access.rows('inspection_access') if workspace_access.current()['id'] in r.get('previous_assigned_user_ids',[]) and not workspace_access.allowed(r['id'])]
+        return {'inspections':inspections,'media':media,'revoked_inspections':revoked}
 
     @app.delete('/inspections/{identity}',dependencies=[Depends(authorized)])
     def delete_inspection(identity:str): return lifecycle.delete_inspection(store,identity)
@@ -707,12 +766,15 @@ def create_app(settings=None):
         async for chunk in request.stream():
             content.extend(chunk)
             if len(content)>4*1024*1024:raise HTTPException(413,'Stamp image limit is 4 MB')
-        try:return signatures.save(store,bytes(content),owner)
+        try:
+            record=signatures.save(store,bytes(content),owner,account_id=workspace_access.current()['id'])
+            workspace_access.put('stamp_access',{'id':record['id'],'user_id':workspace_access.current()['id']})
+            return record
         except ValueError as error:raise HTTPException(422,str(error))
 
     @app.get('/signing-assets',dependencies=[Depends(authorized)])
     def stamp_list():
-        with store.connect() as db:return [dict(row) for row in db.execute('SELECT id,owner,sha256 FROM signing_assets')]
+        with store.connect() as db:return [dict(row) for row in db.execute('SELECT id,owner,sha256 FROM signing_assets') if workspace_access.stamp_allowed(row['id'])]
 
     @app.delete('/signing-assets/{identity}',dependencies=[Depends(authorized)])
     def delete_stamp(identity:str):

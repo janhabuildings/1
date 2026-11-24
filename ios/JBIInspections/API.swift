@@ -39,7 +39,7 @@ struct API {
               let url = URL(string: path, relativeTo: base) else {
             throw APIError(message: "Enter an HTTPS backend URL in Settings.")
         }
-        guard !token.isEmpty else { throw APIError(message: "Set the backend API token in Settings.") }
+        guard !token.isEmpty else { throw APIError(message: "Set your personal access key in Settings.") }
         var req = URLRequest(url: url)
         req.httpMethod = method; req.httpBody = body; req.timeoutInterval = path.hasSuffix("/analyze") ? 360 : 180
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

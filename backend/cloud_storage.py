@@ -14,7 +14,7 @@ import uuid
 
 import httpx
 
-TABLES=('app_migrations','saved_rows','inspections','media','artifacts','template_versions','template_archives',
+TABLES=('workspace_users','inspection_access','stamp_access','workspace_events','app_migrations','saved_rows','inspections','media','artifacts','template_versions','template_archives',
         'template_artifacts','template_active','signing_assets','report_runs',
         'deleted_inspections','deleted_media')
 FILE_TABLES=('media','artifacts','template_artifacts','signing_assets')

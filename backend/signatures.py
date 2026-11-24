@@ -14,7 +14,7 @@ def initialize(store):
         db.execute('CREATE TABLE IF NOT EXISTS signing_assets(id TEXT PRIMARY KEY,owner TEXT NOT NULL,sha256 TEXT NOT NULL,path TEXT NOT NULL)')
 
 
-def save(store,content,owner):
+def save(store,content,owner,account_id=None):
     if not owner.strip() or len(owner)>200: raise ValueError('Enter the engineer name associated with this signature/stamp')
     if len(content)>4*1024*1024: raise ValueError('Stamp image limit is 4 MB')
     try:
@@ -24,8 +24,14 @@ def save(store,content,owner):
     except Exception as error: raise ValueError('Invalid stamp image; use PNG or JPEG') from error
     digest=hashlib.sha256(content).hexdigest()
     with store.connect() as db:
-        row=db.execute('SELECT id FROM signing_assets WHERE sha256=? AND owner=?',(digest,owner.strip())).fetchone()
-        if row:return {'id':row['id'],'owner':owner.strip(),'sha256':digest}
+        rows=db.execute('SELECT id FROM signing_assets WHERE sha256=? AND owner=?',(digest,owner.strip())).fetchall()
+        for row in rows:
+            if account_id is not None:
+                access=db.execute('SELECT payload FROM stamp_access WHERE id=?',(row['id'],)).fetchone()
+                import json
+                owner_id=json.loads(access['payload'])['user_id'] if access else 'workspace-owner'
+                if owner_id!=account_id:continue
+            return {'id':row['id'],'owner':owner.strip(),'sha256':digest}
     identity=uid();path=store.root/'signing'/(identity+'.image');path.write_bytes(content)
     with store.connect() as db:db.execute('INSERT INTO signing_assets VALUES (?,?,?,?)',(identity,owner.strip(),digest,str(path)))
     return {'id':identity,'owner':owner.strip(),'sha256':digest}

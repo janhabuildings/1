@@ -39,6 +39,7 @@ struct ReportDraft: Codable, Equatable, Identifiable {
     var photo_references: [String] = []
 }
 struct Inspection: Codable, Equatable, Identifiable {
+    var revision: Int?
     static func today() -> String {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
@@ -295,7 +296,9 @@ struct SuggestedCitation: Decodable, Identifiable {
     var document: String?
 }
 
-struct DeletionState: Decodable { var inspections: [String]; var media: [String] }
+struct DeletionState: Decodable {
+    var revoked_inspections: [String]?
+    var inspections: [String]; var media: [String] }
 struct StampAsset: Decodable { var id: String; var owner: String; var sha256: String }
 
 struct SavedRow: Codable, Sendable, Equatable, Identifiable {

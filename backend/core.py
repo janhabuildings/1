@@ -39,6 +39,10 @@ class Store:
         self.database=self.root/'inspections.sqlite3'
         with self.connect() as db:
             db.executescript('''
+            CREATE TABLE IF NOT EXISTS workspace_users(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS inspection_access(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS stamp_access(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workspace_events(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS inspections(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS saved_rows(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS app_migrations(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
