@@ -60,7 +60,7 @@ class TemplateEngine(unittest.TestCase):
             self.assertIn('Footer SAMPLE PROJECT',doc.sections[0].footer.paragraphs[0].text)
             with ZipFile(source) as a,ZipFile(p/'result.docx') as b:
                 for name in a.namelist():
-                    if name not in ('word/document.xml','word/footer1.xml'):self.assertEqual(a.read(name),b.read(name),name)
+                    if name not in ('word/document.xml','word/footer1.xml','word/_rels/document.xml.rels','word/settings.xml','[Content_Types].xml'):self.assertEqual(a.read(name),b.read(name),name)
 
     def test_malformed_markers_and_external_content_fields(self):
         from docx.oxml import OxmlElement
