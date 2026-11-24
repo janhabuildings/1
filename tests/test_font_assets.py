@@ -1,52 +1,58 @@
 import base64
+import hashlib
 from io import BytesIO
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-from zipfile import ZipFile,ZIP_DEFLATED
-from backend.font_assets import install_archive,configure_private_fonts
+from zipfile import ZipFile,ZIP_STORED
+
+from backend.font_assets import install_archive,install_environment,aptos_faces,configure_private_fonts
 
 
-def package(path,entries):
+def archive(payload=b'font fixture'):
     buffer=BytesIO()
-    with ZipFile(buffer,'w',ZIP_DEFLATED) as archive:
-        for name,content in entries.items():archive.writestr(name,content)
-    path.write_bytes(base64.b64encode(buffer.getvalue()))
+    with ZipFile(buffer,'w',compression=ZIP_STORED) as package:package.writestr('Aptos.ttf',b'\x00\x01\x00\x00'+payload)
+    return buffer.getvalue()
+
+
+def successful(command,**kwargs):
+    output='Aptos\n' if command[0]=='fc-scan' else ''
+    return subprocess.CompletedProcess(command,0,output,'')
 
 
 class PrivateFonts(unittest.TestCase):
-    def test_missing_and_invalid_secret_do_not_break_startup(self):
+    def test_private_archive_above_old_two_mb_limit_installs(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);secret=root/'fonts.base64'
-            self.assertFalse(install_archive(secret,root/'fonts')['configured'])
-            secret.write_text('not base64!')
-            with patch.dict(os.environ,{'REPORT_FONT_ARCHIVE':str(secret),'XDG_DATA_HOME':str(root/'data')}):
-                result=configure_private_fonts()
-            self.assertEqual(result['installed'],0);self.assertIn('Base64',result['error'])
-
-    def test_path_traversal_and_invalid_fonts_are_not_installed(self):
+            root=Path(directory);file=root/'archive.base64';file.write_bytes(base64.b64encode(archive(b'X'*(2*1024*1024))))
+            self.assertGreater(file.stat().st_size,2*1024*1024)
+            with patch('backend.font_assets.subprocess.run',side_effect=successful):result=install_archive(file,root/'fonts')
+            self.assertEqual(result['installed'],1);self.assertTrue((root/'fonts/Aptos.ttf').is_file())
+    def test_env_parts_checksum_and_missing_parts(self):
+        packed=archive();encoded=base64.b64encode(packed).decode();half=len(encoded)//2
+        env={'REPORT_FONT_DATA_PARTS':'2','REPORT_FONT_DATA_001':encoded[:half],'REPORT_FONT_DATA_002':encoded[half:], 'REPORT_FONT_DATA_SHA256':hashlib.sha256(packed).hexdigest()}
+        with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,env),patch('backend.font_assets.subprocess.run',side_effect=successful):
+            self.assertEqual(install_environment(Path(directory)/'fonts')['installed'],1)
+            os.environ['REPORT_FONT_DATA_SHA256']='0'*64
+            with self.assertRaisesRegex(ValueError,'checksum does not match'):install_environment(Path(directory)/'bad')
+            del os.environ['REPORT_FONT_DATA_002']
+            with self.assertRaisesRegex(ValueError,'incomplete'):install_environment(Path(directory)/'bad')
+    def test_required_faces_reject_silent_substitution_and_missing_bold(self):
+        def match(command,**kwargs):
+            style=command[-1].split('style=')[-1]
+            return subprocess.CompletedProcess(command,0,('Liberation Sans' if style=='Bold' else 'Aptos')+'\n'+style+'\n','')
+        with patch('backend.font_assets.subprocess.run',side_effect=match):result=aptos_faces()
+        self.assertFalse(result['ready']);self.assertEqual(result['missing_faces'],['Aptos Bold'])
+    def test_archive_path_traversal_does_not_write_fonts(self):
+        data=BytesIO()
+        with ZipFile(data,'w') as package:package.writestr('../Aptos.ttf',b'\x00\x01\x00\x00fixture')
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);secret=root/'fonts.base64';destination=root/'fonts'
-            for files in ({'../outside.ttf':b'bad'},{'a.ttf':b'bad'},{'a.py':b'bad'}):
-                package(secret,files)
-                with self.assertRaises(ValueError):install_archive(secret,destination)
-                self.assertFalse((root/'outside.ttf').exists())
-                self.assertFalse((destination/'a.ttf').exists())
-
-    @unittest.skipUnless(shutil.which('fc-scan') and shutil.which('fc-match') and shutil.which('fc-cache'),'Fontconfig required')
-    def test_valid_operator_font_and_license_install_privately(self):
-        candidates=subprocess.check_output(['fc-list','--format','%{file}\n'],text=True).splitlines()
-        source=next((Path(name) for name in candidates if Path(name).suffix.lower() in ('.ttf','.otf') and Path(name).read_bytes()[:4] in (b'\x00\x01\x00\x00',b'OTTO')),None)
-        if source is None:self.skipTest('A local TrueType/OpenType font is required for this fixture')
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory);secret=root/'fonts.base64';data=root/'data';destination=data/'fonts/jbi'
-            package(secret,{'Operator.ttf':source.read_bytes(),'License.txt':b'Operator-supplied license'})
-            with patch.dict(os.environ,{'XDG_DATA_HOME':str(data),'XDG_CACHE_HOME':str(root/'cache')}):
-                result=install_archive(secret,destination)
-            self.assertEqual(result['installed'],1);self.assertTrue(result['families'])
-            self.assertEqual((destination/'Operator.ttf').read_bytes(),source.read_bytes())
-            self.assertEqual((destination/'License.txt').read_bytes(),b'Operator-supplied license')
+            path=Path(directory)/'bad.base64';path.write_bytes(base64.b64encode(data.getvalue()))
+            with self.assertRaisesRegex(ValueError,'flat filenames'):install_archive(path,Path(directory)/'fonts')
+            self.assertFalse((Path(directory)/'fonts').exists())
+    def test_invalid_private_setup_keeps_inspection_access_available(self):
+        with patch.dict(os.environ,{'REPORT_FONT_DATA_PARTS':'nope'}),patch('backend.font_assets.aptos_faces',return_value={'ready':False,'missing_faces':['Aptos'],'faces':[]}):
+            result=configure_private_fonts()
+        self.assertEqual(result['installed'],0);self.assertIn('part count',result['error'])
