@@ -1,12 +1,19 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JBI Inspection Workspace</title><link rel="stylesheet" href="/web/style.css"><script src="/web/action-options.js" defer></script><script src="/web/drafting.js" defer></script><script src="/web/app.js" defer></script><script src="/web/report-preview.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JBI Inspection Workspace</title><link rel="stylesheet" href="/web/style.css"><script src="/web/action-options.js" defer></script><script src="/web/drafting.js" defer></script><script src="/web/app.js" defer></script><script src="/web/workspace.js" defer></script><script src="/web/report-preview.js" defer></script></head>
 <body>
 <header><div class="brand">JBI<span>INSPECTION WORKSPACE</span></div><span class="badge">TEST ENVIRONMENT</span></header>
 <main>
 <section class="intro"><p class="eyebrow">FIELD NOTES → REVIEWED REPORTS</p><h1>Your site inspection,<br>in one workspace.</h1><p>Collect evidence, confirm findings, and prepare scaffold and shed reports using your original templates.</p></section>
 <div id="storage-notice" class="notice">Connect to check storage status. Keep local copies until your changes show Saved. AI and final document formatting need separate review.</div>
-<section id="connection" class="panel"><h2>Connect to your private backend</h2><p>Copy <code>INSPECTION_API_TOKEN</code> from this service’s Render Environment settings. Enter it here, never in chat. It is kept only in this page’s memory.</p><form id="connect-form" class="connection-form"><label>API token<input id="token" type="password" autocomplete="off" spellcheck="false" required></label><button type="submit">Connect</button></form></section>
+<section id="connection" class="panel"><h2>Sign in to your company workspace</h2><p>Use the personal access key provided privately by your workspace administrator. It is kept only in this page’s memory. Administrators can use the existing owner credential to set up accounts.</p><form id="connect-form" class="connection-form"><label>Personal access key<input id="token" type="password" autocomplete="off" spellcheck="false" required></label><button type="submit">Connect</button></form></section>
 <div id="workspace" hidden>
+<section id="workspace-admin" class="panel" hidden><details><summary>Company users and inspection assignments</summary>
+<p>Existing inspections are visible to administrators. Assign them below to give inspectors access. Inspectors can also create inspections, automatically assigned to themselves.</p>
+<form id="workspace-user-form" class="grid"><label>Name<input id="workspace-user-name" required maxlength="120"></label><label>Email<input id="workspace-user-email" type="email" required maxlength="254"></label><label>Role<select id="workspace-user-role"><option value="inspector">Inspector</option><option value="admin">Admin</option></select></label><button type="submit">Create account</button></form>
+<div id="workspace-key-box" hidden><p id="workspace-key-label"></p><label>Copy this personal access key<input id="workspace-key" type="text" readonly autocomplete="off" spellcheck="false"></label><button id="workspace-key-dismiss" type="button" class="secondary">Hide key</button></div>
+<div id="workspace-users"></div><h3>Assign the current inspection</h3><div id="workspace-assignment"></div>
+</details></section>
+
 <div class="workspace-heading"><div><span id="connection-state" class="connected">Connected</span><p id="capabilities" class="muted"></p></div><button id="disconnect" class="secondary">Disconnect</button></div>
 <nav aria-label="Workspace sections"><button data-tab="inspection" class="tab active">01 · Inspection</button><button data-tab="evidence" class="tab">02 · Evidence</button><button data-tab="reports" class="tab">03 · Reports</button><button data-tab="library" class="tab">Code references</button><button data-tab="templates" class="tab">Templates</button></nav>
 <section id="tab-inspection" class="tab-content">

@@ -1,3 +1,7 @@
+# Current multi-user setup
+
+See [Shared company workspace](MULTI_USER.md) for individual accounts, assignments, private stamps, migration and iPhone account switching. The historical single-operator notes below describe earlier releases.
+
 # Inspection backend
 
 FastAPI + SQLite + a private filesystem; no Supabase dependency. Supports single-operator inspection records, retry-safe uploads, optional AI suggestions, portable keyword/vector references and the existing template-preserving report generator. It has no mail-send, WhatsApp-read or phone-call recording endpoints.

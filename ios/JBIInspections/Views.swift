@@ -76,7 +76,8 @@ struct InspectionList: View {
 }
 
 struct SettingsView: View {
-    @AppStorage("backendURL") private var backendURL = API.defaultBaseURL
+    @EnvironmentObject private var account: AccountSession
+    @State private var backendURL = UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL
     @AppStorage("draftMailboxEmail") private var draftMailboxEmail = ""
     @AppStorage("draftToEmails") private var draftToEmails = ""
     @AppStorage("draftCCEmails") private var draftCCEmails = ""
@@ -93,13 +94,24 @@ struct SettingsView: View {
                     TextField("Default Cc emails (comma separated)", text: $draftCCEmails).keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Text("Use an account configured in Apple Mail. Open the draft, verify From, then Cancel → Save Draft to put it in that account’s Drafts folder. Email myself a copy addresses a new message to the saved mailbox; you decide whether to send.").font(.caption)
                 }
-                Section("Private backend") {
+                Section("Company workspace") {
+                    Text("Use your own access key. Your inspections and files stay in a separate local account profile. Administrators manage users and assignments on the website.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(UserDefaults.standard.string(forKey: "workspaceAccountName") ?? "Workspace owner")
                     TextField("Render backend URL", text: $backendURL).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("Backend API token", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField("Personal access key", text: $token).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Save connection") {
-                        do { try SecureToken.save(token); result = "Saved. Credentials stay in this phone's Keychain." }
+                        Task {
+                            do { try await account.connect(baseURL: backendURL, token: token.trimmingCharacters(in: .whitespacesAndNewlines)); dismiss() }
+                            catch { result = error.localizedDescription }
+                        }
+                    }
+                    .disabled(account.connecting)
+                    Button("Sign out", role: .destructive) {
+                        do { try account.signOut(); dismiss() }
                         catch { result = error.localizedDescription }
                     }
+                    .disabled(account.connecting)
                     Button("Test connection") {
                         Task {
                             do {

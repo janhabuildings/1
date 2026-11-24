@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import CryptoKit
 
 @MainActor final class InspectionStore: ObservableObject {
     @Published var cache = Cache()
@@ -13,9 +14,17 @@ import Foundation
     private var suggestionSync: (id: UUID, task: Task<Void, Error>)?
     let directory: URL
     private var activeSyncs: [String: (id: UUID, task: Task<Void, Error>)] = [:]
-    init() {
-        directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    private let connection: API
+    init(baseURL: String? = nil, token: String? = nil, accountID: String? = nil) {
+        let endpoint = baseURL ?? UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL
+        connection = API(baseURL: endpoint, token: token ?? SecureToken.read())
+        let identity = accountID ?? UserDefaults.standard.string(forKey: "workspaceAccountID")
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("JBIInspections", isDirectory: true)
+        if let identity, !(identity == "workspace-owner" && endpoint == API.defaultBaseURL) {
+            let scope = SHA256.hash(data: Data((endpoint + "|" + identity).utf8)).map { String(format: "%02x", $0) }.joined()
+            directory = root.appendingPathComponent("accounts", isDirectory: true).appendingPathComponent(scope, isDirectory: true)
+        } else { directory = root }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
@@ -27,7 +36,7 @@ import Foundation
         locallyDeletedInspections.formUnion(cache.pendingInspectionDeletions ?? [])
         locallyDeletedMedia.formUnion(cache.pendingMediaDeletions ?? [])
     }
-    var api: API { API(baseURL: UserDefaults.standard.string(forKey: "backendURL") ?? API.defaultBaseURL, token: SecureToken.read()) }
+    var api: API { connection }
     var companyNames: [String] { (cache.savedRows ?? []).filter { $0.kind == "company" }.map(\.company) }
     func saveCompanyNames(_ value: String) {
         for name in Set(value.components(separatedBy: CharacterSet(charactersIn: ";\n")).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }) {
@@ -82,7 +91,7 @@ import Foundation
         catch { self.error = "Could not save inspection: \(error.localizedDescription)" }
     }
     func save(_ inspection: Inspection) {
-        if let i = cache.inspections.firstIndex(where: { $0.id == inspection.id }) { cache.inspections[i] = inspection }
+        if let i = cache.inspections.firstIndex(where: { $0.id == inspection.id }) { var updated = inspection; updated.revision = cache.inspections[i].revision ?? inspection.revision; cache.inspections[i] = updated }
         else { cache.inspections.insert(inspection, at: 0) }
         cache.dirty.insert(inspection.id); persist()
     }
@@ -96,7 +105,7 @@ import Foundation
         return item.id
     }
     func mediaURL(_ item: LocalMedia) -> URL { directory.appendingPathComponent(item.relativePath) }
-    var connected: Bool { !SecureToken.read().isEmpty }
+    var connected: Bool { !connection.token.isEmpty }
     func flushDeletions() async throws {
         for id in cache.pendingInspectionDeletions ?? [] {
             _ = try await api.request("/inspections/\(id)", method: "DELETE")
@@ -147,7 +156,9 @@ import Foundation
         guard cache.inspections.contains(where: { $0.id == inspection.id }) else { return }
         var outbound = inspection
         outbound.prepareAttendees()
-        _ = try await api.request("/inspections/\(inspection.id)", method: "PUT", body: JSONEncoder().encode(outbound))
+        let saved = try JSONDecoder().decode(Inspection.self, from: await api.request("/inspections/\(inspection.id)", method: "PUT", body: JSONEncoder().encode(outbound)))
+        var expected = inspection; expected.revision = saved.revision
+        if let index = cache.inspections.firstIndex(where: { $0.id == inspection.id }) { cache.inspections[index].revision = saved.revision; persist() }
         let snapshot = cache.media.filter { $0.inspectionID == inspection.id }
         let records = try JSONSerialization.jsonObject(with: await api.request("/inspections/\(inspection.id)/media")) as? [[String: Any]] ?? []
         let remoteIDs = Set(records.compactMap { $0["id"] as? String })
@@ -160,7 +171,7 @@ import Foundation
             _ = try await api.json("/media/\(item.id)", method: "PUT", object: ["note": item.note, "equipment": item.equipment])
             if let index = cache.media.firstIndex(where: { $0.id == item.id }) { cache.media[index].uploaded = true }
         }
-        if cache.inspections.first(where: { $0.id == inspection.id }) == inspection {
+        if cache.inspections.first(where: { $0.id == inspection.id }) == expected {
             let current = cache.media.filter { $0.inspectionID == inspection.id }
             if current.map({ $0.id + $0.note + $0.equipment }) == snapshot.map({ $0.id + $0.note + $0.equipment }) { cache.dirty.remove(inspection.id) }
         }
@@ -183,8 +194,19 @@ import Foundation
     }
     func refresh() async throws {
         try await syncSuggestions()
-        try await flushDeletions()
         let deleted = try JSONDecoder().decode(DeletionState.self, from: await api.request("/sync/deletions"))
+        let revoked = Set(deleted.revoked_inspections ?? [])
+        let revokedMedia = Set(cache.media.filter { revoked.contains($0.inspectionID) }.map(\.id))
+        cache.pendingMediaDeletions?.subtract(revokedMedia)
+        for item in cache.media where revoked.contains(item.inspectionID) { try? FileManager.default.removeItem(at: mediaURL(item)) }
+        cache.media.removeAll { revoked.contains($0.inspectionID) }
+        cache.inspections.removeAll { revoked.contains($0.id) }; cache.dirty.subtract(revoked)
+        cache.pendingInspectionDeletions?.subtract(revoked)
+        for (id, owner) in cache.artifactOwners ?? [:] where revoked.contains(owner) {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("exports").appendingPathComponent(id))
+            cache.artifactOwners?.removeValue(forKey: id)
+        }
+        try await flushDeletions()
         locallyDeletedInspections.formUnion(deleted.inspections); locallyDeletedMedia.formUnion(deleted.media)
         for item in cache.media where deleted.media.contains(item.id) || deleted.inspections.contains(item.inspectionID) { try? FileManager.default.removeItem(at: mediaURL(item)) }
         cache.media.removeAll { deleted.media.contains($0.id) || deleted.inspections.contains($0.inspectionID) }
