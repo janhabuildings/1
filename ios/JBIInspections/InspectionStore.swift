@@ -5,6 +5,8 @@ import Foundation
     @Published var cache = Cache()
     @Published var error: String?
     @Published var busy = false
+    @Published private(set) var refreshing = false
+    private let refreshCoordinator = RefreshCoordinator()
     @Published var libraryNotice = ""
     private var suggestionSync: (id: UUID, task: Task<Void, Error>)?
     let directory: URL
@@ -159,6 +161,13 @@ import Foundation
         persist()
     }
     func syncAll() async throws {
+        try await refreshCoordinator.run {
+            self.refreshing = true
+            defer { self.refreshing = false }
+            try await self.performSyncAll()
+        }
+    }
+    private func performSyncAll() async throws {
         try await refresh()
         for inspection in cache.inspections where cache.dirty.contains(inspection.id) { try await sync(inspection) }
         try await refresh()
