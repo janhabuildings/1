@@ -12,7 +12,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from zipfile import ZipFile
+from zipfile import ZipFile, ZIP_DEFLATED
 from docx import Document
 from docx.table import _Cell
 from docx.shared import Inches, Pt
@@ -185,6 +185,117 @@ def template_values(data):
     return result
 
 
+def no_open_items_email(calendar_text):
+    """Return the calendar's No OIs cover text, without interpreting instructions."""
+    source=str(calendar_text or '').replace('\r\n','\n').replace('\r','\n')
+    heading=re.compile(r'^\s*IF\s+NO\s+(?:OPEN\s+ITEMS?|OIs?)\s+REPORT\s*:\s*$',re.I|re.M)
+    boundary=re.compile(r'^\s*(?:[+=]{4,}|IF\s+OPEN\s+ITEMS?\s+REPORT\s*:|DSENY\s+Engineering|Title\s*:|Section\s+1\b)',re.I|re.M)
+    candidates=[]
+    for marker in heading.finditer(source):
+        remaining=source[marker.end():]
+        end=boundary.search(remaining)
+        body=remaining[:end.start() if end else len(remaining)].strip()
+        if re.match(r'Dear\s+Client\b',body,re.I) and re.search(r'no\s+open\s+items?',body,re.I):
+            candidates.append(body)
+    unique=list(dict.fromkeys(candidates))
+    return unique[0] if len(unique)==1 else None
+
+
+def number_report_pages(output):
+    """Add centered PAGE of NUMPAGES fields without rewriting unrelated DOCX parts."""
+    output=Path(output)
+    parser=etree.XMLParser(resolve_entities=False,load_dtd=False,no_network=True)
+    relns='http://schemas.openxmlformats.org/package/2006/relationships'
+    office='http://schemas.openxmlformats.org/officeDocument/2006/relationships/'
+    contentns='http://schemas.openxmlformats.org/package/2006/content-types'
+    with ZipFile(output) as package:
+        infos=package.infolist();parts={item.filename:package.read(item.filename) for item in infos}
+    document=etree.fromstring(parts['word/document.xml'],parser)
+    relationships=etree.fromstring(parts['word/_rels/document.xml.rels'],parser)
+    content_types=etree.fromstring(parts['[Content_Types].xml'],parser)
+    sections=document.findall('.//'+W+'sectPr')
+    if not sections:return
+    relations={node.get('Id'):node for node in relationships}
+    def register(name,kind):
+        partname='/'+name
+        if not any(node.get('PartName')==partname for node in content_types):
+            node=etree.SubElement(content_types,'{'+contentns+'}Override');node.set('PartName',partname);node.set('ContentType','application/vnd.openxmlformats-officedocument.wordprocessingml.'+kind+'+xml')
+    def relationship(target,kind):
+        suffix=1;identity='rIdJBI'+kind.title()
+        while identity in relations:suffix+=1;identity='rIdJBI'+kind.title()+str(suffix)
+        node=etree.SubElement(relationships,'{'+relns+'}Relationship');node.set('Id',identity);node.set('Type',office+kind);node.set('Target',target);relations[identity]=node
+        return identity
+    inherited={};footers={}
+    for index,section in enumerate(sections):
+        current=dict(inherited)
+        for reference in section.findall(W+'footerReference'):current[reference.get(W+'type')]=reference.get('{'+office[:-1]+'}id')
+        if not current.get('default'):
+            number=1;name='word/jbi-page-footer.xml'
+            while name in parts:number+=1;name=f'word/jbi-page-footer{number}.xml'
+            parts[name]=etree.tostring(etree.Element(W+'ftr',nsmap={'w':NS['w']}),xml_declaration=True,encoding='UTF-8',standalone=True)
+            register(name,'footer');current['default']=relationship(name.removeprefix('word/'),'footer')
+        for kind in ('default','first','even'):
+            identity=current.get(kind) or current['default'];relation=relations.get(identity)
+            if relation is None or relation.get('Type')!=office+'footer' or relation.get('TargetMode')=='External':raise ValueError('Invalid report footer relationship')
+            import posixpath
+            target=posixpath.normpath(posixpath.join('word',relation.get('Target','')))
+            if not target.startswith('word/') or target not in parts:raise ValueError('Report footer part is unavailable')
+            footers[target]=None
+            current[kind]=identity
+        for reference in list(section.findall(W+'footerReference')):section.remove(reference)
+        position=sum(child.tag==W+'headerReference' for child in section)
+        for kind in ('default','first','even'):
+            reference=etree.Element(W+'footerReference');reference.set(W+'type',kind);reference.set('{'+office[:-1]+'}id',current[kind]);section.insert(position,reference);position+=1
+        margins=section.find(W+'pgMar')
+        if margins is not None:margins.set(W+'footer','360')
+        numbering=section.find(W+'pgNumType')
+        if numbering is None:
+            numbering=etree.Element(W+'pgNumType');next_node=section.find(W+'cols')
+            if next_node is None:next_node=section.find(W+'docGrid')
+            section.insert(list(section).index(next_node) if next_node is not None else len(section),numbering)
+        numbering.set(W+'fmt','decimal');numbering.attrib.pop(W+'start',None)
+        if index==0:numbering.set(W+'start','1')
+        inherited=current
+    for index,name in enumerate(footers,1):
+        footer=etree.fromstring(parts[name],parser)
+        for paragraph in list(footer.findall(W+'p')):
+            text=''.join(node.text or '' for node in paragraph.iter(W+'t')).strip()
+            owned=paragraph.xpath('.//w:bookmarkStart[starts-with(@w:name,"JBI_PageCount_")]',namespaces=NS)
+            codes=' '.join(node.text or '' for node in paragraph.iter(W+'instrText'))
+            page_only=bool(re.search(r'\b(?:PAGE|NUMPAGES)\b',codes)) and bool(re.fullmatch(r'(?:Page\s*)?\d*\s*(?:(?:of|/)\s*\d*)?',text,re.I))
+            empty=not text and not paragraph.xpath('.//w:drawing | .//w:pict',namespaces=NS)
+            if owned or page_only or empty:footer.remove(paragraph)
+        paragraph=etree.SubElement(footer,W+'p');props=etree.SubElement(paragraph,W+'pPr');etree.SubElement(props,W+'jc').set(W+'val','center')
+        spacing=etree.SubElement(props,W+'spacing')
+        for key,value in (('before','0'),('after','0'),('line','220'),('lineRule','exact')):spacing.set(W+key,value)
+        bookmark=etree.SubElement(paragraph,W+'bookmarkStart');bookmark.set(W+'id',str(9000+index));bookmark.set(W+'name','JBI_PageCount_'+str(index))
+        def run():
+            node=etree.SubElement(paragraph,W+'r');properties=etree.SubElement(node,W+'rPr');fonts=etree.SubElement(properties,W+'rFonts')
+            for key in ('ascii','hAnsi'):fonts.set(W+key,'Aptos')
+            etree.SubElement(properties,W+'sz').set(W+'val','18');etree.SubElement(properties,W+'color').set(W+'val','000000')
+            return node
+        def field(instruction):
+            begin=etree.SubElement(run(),W+'fldChar');begin.set(W+'fldCharType','begin');begin.set(W+'dirty','true')
+            code=etree.SubElement(run(),W+'instrText');code.set('{http://www.w3.org/XML/1998/namespace}space','preserve');code.text=' '+instruction+' '
+            etree.SubElement(run(),W+'fldChar').set(W+'fldCharType','separate');etree.SubElement(run(),W+'t').text='1'
+            etree.SubElement(run(),W+'fldChar').set(W+'fldCharType','end')
+        field('PAGE');separator=etree.SubElement(run(),W+'t');separator.set('{http://www.w3.org/XML/1998/namespace}space','preserve');separator.text=' of ';field('NUMPAGES')
+        etree.SubElement(paragraph,W+'bookmarkEnd').set(W+'id',str(9000+index))
+        parts[name]=etree.tostring(footer,xml_declaration=True,encoding='UTF-8',standalone=True)
+    settings=etree.fromstring(parts['word/settings.xml'],parser)
+    update=settings.find(W+'updateFields')
+    if update is None:update=etree.SubElement(settings,W+'updateFields')
+    update.set(W+'val','true')
+    for name,tree in [('word/document.xml',document),('word/_rels/document.xml.rels',relationships),('[Content_Types].xml',content_types),('word/settings.xml',settings)]:parts[name]=etree.tostring(tree,xml_declaration=True,encoding='UTF-8',standalone=True)
+    with tempfile.NamedTemporaryFile(dir=output.parent,suffix='.docx',delete=False) as handle:temporary=Path(handle.name)
+    try:
+        with ZipFile(temporary,'w',compression=ZIP_DEFLATED) as package:
+            for info in infos:package.writestr(info,parts.pop(info.filename))
+            for name,content in parts.items():package.writestr(name,content)
+        temporary.replace(output)
+    finally:temporary.unlink(missing_ok=True)
+
+
 def fill_placeholders(data, output, source, mapping, reserve_signature=False):
     values=template_values(data)
     example_ids=example_stamp_rel_ids(Document(source))
@@ -228,6 +339,7 @@ def fill_placeholders(data, output, source, mapping, reserve_signature=False):
                 if item.filename=='word/document.xml':changed=space_report_sections(root.find(W+'body')) or changed
                 if changed: content=etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
             result.writestr(item,content)
+    number_report_pages(output)
     return source
 
 
@@ -434,6 +546,7 @@ def fill_report(data, output, *, draft=False, template=None, template_mode="lega
     with ZipFile(source) as original, ZipFile(output, 'w') as result:
         for item in original.infolist():
             result.writestr(item, xml if item.filename == 'word/document.xml' else original.read(item.filename))
+    number_report_pages(output)
     return source
 
 
@@ -524,6 +637,7 @@ def build(data, directory):
                     'See attached; please print & keep at the jobsite. It is the responsibility of the '
                     'contractor to ensure these reports are forwarded to all appropriate parties.\n\n')
             text += 'Regards,\n' + next(a['name'] for a in data['attendees'] if is_pe(a['title']))
+            text = no_open_items_email(data.get('calendar_text','')) or text
             msg.set_content(text)
             msg.add_alternative('<html><body>' + ''.join('<p>'+escape(p).replace('\n','<br>')+'</p>' for p in text.split('\n\n')) + '</body></html>', subtype='html')
             msg.add_attachment(pdf.read_bytes(), maintype='application', subtype='pdf', filename=pdf.name)

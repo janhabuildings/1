@@ -612,7 +612,8 @@ def create_app(settings=None):
         runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
         output=store.root/'reports'/uid()
         request={'mailbox':{'account':data.mailbox_email.strip() or 'janhabuildings@gmail.com','to':data.to,'cc':data.cc,
-                            'recipients_confirmed':data.recipients_confirmed},'reports':entries}
+                            'recipients_confirmed':data.recipients_confirmed},'reports':entries,
+                 'calendar_text':store.get(identity).get('calendar_text','') if identity else ''}
         stamp=None
         stamp_entries=[r for r in entries if r['status']=='No OIs' and (data.stamp_equipment is None or r['equipment'] in data.stamp_equipment)]
         if data.stamp_id and stamp_entries:

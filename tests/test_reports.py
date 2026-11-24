@@ -30,9 +30,9 @@ class Reports(unittest.TestCase):
                         self.assertIn(d['open_items'][0]['action'],text)
                         self.assertEqual(len(doc.tables[4].rows),3)
                     with ZipFile(master) as a, ZipFile(out) as b:
-                        self.assertEqual(a.namelist(),b.namelist())
+                        self.assertEqual(set(b.namelist())-set(a.namelist()),{'word/jbi-page-footer.xml'})
                         for name in a.namelist():
-                            if name!='word/document.xml': self.assertEqual(a.read(name),b.read(name),name)
+                            if name not in {'word/document.xml','word/_rels/document.xml.rels','word/settings.xml','[Content_Types].xml'}: self.assertEqual(a.read(name),b.read(name),name)
                         original=Document(master)
                         self.assertEqual(original.tables[1].cell(2,3)._tc.tcPr.xml,doc.tables[1].cell(2,3)._tc.tcPr.xml)
                         if status=='No OIs':
@@ -40,7 +40,14 @@ class Reports(unittest.TestCase):
                             self.assertEqual(doc.sections[0].bottom_margin.inches,0.5)
                             original.sections[0].top_margin=doc.sections[0].top_margin
                             original.sections[0].bottom_margin=doc.sections[0].bottom_margin
-                        self.assertEqual(original.sections[0]._sectPr.xml,doc.sections[0]._sectPr.xml)
+                        original.sections[0].footer_distance=doc.sections[0].footer_distance
+                        # Pagination intentionally adds references and page numbering.
+                        from copy import deepcopy as clone
+                        section=clone(doc.sections[0]._sectPr)
+                        for node in list(section):
+                            if node.tag in {agent.W+'footerReference',agent.W+'pgNumType'}: section.remove(node)
+                        def structure(node): return (node.tag,dict(node.attrib),node.text,tuple(structure(child) for child in node))
+                        self.assertEqual(structure(original.sections[0]._sectPr),structure(section))
     def test_reject_unsafe_or_incomplete_inputs(self):
         for change in ({'status':'No OIs'}, {'open_items':[]}, {'recipients_confirmed':False},
                        {'inspection_date':'2026-02-30'}, {'to':['bad\r\nBcc: x@example.com']},
@@ -84,3 +91,4 @@ class OfficeIntegration(unittest.TestCase):
                         self.assertNotIn('signed and sealed',html)
 
 if __name__=='__main__': unittest.main()
+
