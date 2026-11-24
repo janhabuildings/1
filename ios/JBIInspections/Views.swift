@@ -544,8 +544,6 @@ struct InspectionDetail: View {
                         Text("Not assigned").tag(""); Text("Scaffold").tag("SF"); Text("Shed").tag("SH"); Text("Other").tag("OT")
                     }
                     TextField("Location / observation", text: mediaBinding(item.id, \.note), axis: .vertical)
-                        .onChange(of: item.note) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
-                        .onChange(of: item.equipment) { _, _ in store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync() }
                     if ["photo", "audio", "video"].contains(item.kind) {
                         Button("Delete evidence", role: .destructive) { removeMediaID = item.id }.buttonStyle(.borderless)
                     }
@@ -559,7 +557,7 @@ struct InspectionDetail: View {
                     Text(item.uploaded ? "Uploaded to backend" : "Saved on this phone").font(.caption).foregroundStyle(.secondary)
                 }
             }
-        }.onChange(of: store.cache.media) { _, _ in store.cache.dirty.insert(inspection.id); store.persist() }
+        }
     }
     private var reports: some View {
         Section("Report facts — inspector review") {
@@ -728,7 +726,10 @@ struct InspectionDetail: View {
     }
     private func mediaBinding(_ id: String, _ key: WritableKeyPath<LocalMedia, String>) -> Binding<String> {
         Binding(get: { store.cache.media.first(where: { $0.id == id })?[keyPath: key] ?? "" }, set: { value in
-            if let index = store.cache.media.firstIndex(where: { $0.id == id }) { store.cache.media[index][keyPath: key] = value }
+            if let index = store.cache.media.firstIndex(where: { $0.id == id }), store.cache.media[index][keyPath: key] != value {
+                store.cache.media[index][keyPath: key] = value
+                store.cache.dirty.insert(inspection.id); store.persist(); scheduleSync()
+            }
         })
     }
     private func scheduleSync() {

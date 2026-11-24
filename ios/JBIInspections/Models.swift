@@ -548,3 +548,15 @@ enum SyncFailure {
         try await task.value
     }
 }
+
+// A response that was requested before a local edit/deletion must not overwrite
+// that newer state when it arrives after navigation into the inspection.
+enum RefreshMergePolicy {
+    static func allowsInspection(_ id: String, cache: Cache, deleted: Set<String>) -> Bool {
+        cache.inspections.contains { $0.id == id } && !cache.dirty.contains(id) &&
+        cache.pendingInspectionDeletions?.contains(id) != true && !deleted.contains(id)
+    }
+    static func allowsMedia(_ id: String, before: LocalMedia?, current: LocalMedia?, pending: Set<String>, deleted: Set<String>) -> Bool {
+        !pending.contains(id) && !deleted.contains(id) && before == current
+    }
+}

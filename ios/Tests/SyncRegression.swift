@@ -56,6 +56,23 @@ import Foundation
         } catch { precondition(!SyncFailure.isCancellation(error)) }
         try await coordinator.run { runs += 1 }
         precondition(runs == 3, "Failure cleanup must allow a retry")
+        var inspection = Inspection(); inspection.id = "visit"
+        var cache = Cache(); cache.inspections = [inspection]
+        precondition(RefreshMergePolicy.allowsInspection("visit", cache: cache, deleted: []))
+        cache.dirty.insert("visit")
+        precondition(!RefreshMergePolicy.allowsInspection("visit", cache: cache, deleted: []))
+        cache.dirty.remove("visit")
+        precondition(!RefreshMergePolicy.allowsInspection("visit", cache: cache, deleted: ["visit"]))
+        cache.inspections = []
+        precondition(!RefreshMergePolicy.allowsInspection("visit", cache: cache, deleted: []))
+        let before = LocalMedia(id: "photo", inspectionID: "visit", kind: "photo", relativePath: "photo.jpg", note: "Original", mime: "image/jpeg")
+        var edited = before; edited.note = "New field note"
+        precondition(RefreshMergePolicy.allowsMedia("photo", before: before, current: before, pending: [], deleted: []))
+        precondition(!RefreshMergePolicy.allowsMedia("photo", before: before, current: edited, pending: [], deleted: []))
+        precondition(!RefreshMergePolicy.allowsMedia("photo", before: before, current: nil, pending: [], deleted: []))
+        precondition(!RefreshMergePolicy.allowsMedia("photo", before: nil, current: nil, pending: [], deleted: ["photo"]))
+        precondition(!RefreshMergePolicy.allowsMedia("photo", before: nil, current: before, pending: [], deleted: []))
+        precondition(RefreshMergePolicy.allowsMedia("new-photo", before: nil, current: nil, pending: [], deleted: []))
         print("Refresh cancellation filtering, shared sync ownership, concurrent joining, real failures and retry regression checks passed.")
     }
 }
