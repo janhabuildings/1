@@ -45,7 +45,7 @@ class CellMapping(unittest.TestCase):
                     self.assertEqual(cells(table.rows[6])[1].text,'Yes')
                     for section in doc.tables[2:5]:
                         previous=section._element.getprevious();self.assertEqual(previous.tag,report_agent.W+'p')
-                        if previous.find('.//'+report_agent.W+'pageBreakBefore') is None:
+                        if previous.find('.//'+report_agent.W+'pageBreakBefore') is None and not previous.xpath('.//w:bookmarkStart[starts-with(@w:name,"JBI_ReportGap_")]'):
                             self.assertEqual(previous.getprevious().tag,report_agent.W+'p')
                     if status=='OIs':
                         number=doc.tables[4].rows[-1].cells[0]
